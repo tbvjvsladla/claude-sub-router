@@ -16,7 +16,7 @@ try {
   for (const [binary, model] of cases) {
     const environment = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1' };
     if (binary === 'claude') {
-      for (const name of Object.keys(environment)) if (name.startsWith('ANTHROPIC_') || name.startsWith('CLAUDE_CODE_USE_') || ['CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'MOONSHOT_API_KEY', 'DEEPSEEK_API_KEY', 'MINIMAX_API_KEY'].includes(name)) delete environment[name];
+      for (const name of Object.keys(environment)) if (name.startsWith('ANTHROPIC_') || name.startsWith('CLAUDE_CODE_USE_') || ['CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'MOONSHOT_API_KEY', 'DEEPSEEK_API_KEY', 'MINIMAX_API_KEY', 'OPENROUTER_API_KEY'].includes(name)) delete environment[name];
     }
     const args = ['-p', 'Reply with exactly ROUTER_E2E_OK and nothing else.', '--model', model,
       '--output-format', 'json', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',

@@ -27,6 +27,7 @@ export interface Provider {
   base_url: string;
   auth?: 'api_key' | 'claude_subscription';
   api_key_env?: string;
+  api_key_header?: 'x-api-key' | 'authorization';
 }
 export type Registry = Map<string, { provider: Provider; model: Model }>;
 export class ConfigError extends Error {}
@@ -102,16 +103,19 @@ export function loadRegistry(directory = join(ROOT, 'config/providers')): Regist
     }
     fields(config, { provider: 'object', models: 'array' }, {}, name);
     const provider = config.provider;
-    fields(provider, { id: 'string', name: 'string', protocol: 'string', base_url: 'string' }, { auth: 'string', api_key_env: 'string' }, `${name}.provider`);
+    fields(provider, { id: 'string', name: 'string', protocol: 'string', base_url: 'string' }, { auth: 'string', api_key_env: 'string', api_key_header: 'string' }, `${name}.provider`);
     if (provider.protocol !== 'anthropic') throw new ConfigError(`${name}: only anthropic protocol is supported`);
     const auth = provider.auth ?? 'api_key';
     if (auth === 'api_key') {
       if (typeof provider.api_key_env !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(provider.api_key_env)) {
         throw new ConfigError(`${name}: api_key_env is required for api_key auth`);
       }
+      if (provider.api_key_header !== undefined && !['x-api-key', 'authorization'].includes(String(provider.api_key_header))) {
+        throw new ConfigError(`${name}: api_key_header must be x-api-key or authorization`);
+      }
     } else if (auth === 'claude_subscription') {
-      if ('api_key_env' in provider || String(provider.base_url).replace(/\/+$/, '') !== 'https://api.anthropic.com') {
-        throw new ConfigError(`${name}: subscription auth requires the official Anthropic URL and no api_key_env`);
+      if ('api_key_env' in provider || 'api_key_header' in provider || String(provider.base_url).replace(/\/+$/, '') !== 'https://api.anthropic.com') {
+        throw new ConfigError(`${name}: subscription auth requires the official Anthropic URL and no api_key_env or api_key_header`);
       }
     } else throw new ConfigError(`${name}: unsupported auth type`);
     let url: URL;

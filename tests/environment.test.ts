@@ -105,11 +105,12 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
   const root = fixture();
   const registry = loadRegistry();
   writeFileSync(join(root, 'envs/CHINA.env'), 'MOONSHOT_API_KEY=FAKE_KIMI\nDEEPSEEK_API_KEY=FAKE_DEEPSEEK');
-  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX');
+  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX\nOPENROUTER_API_KEY=FAKE_OPENROUTER');
   const { environment } = loadProviderEnvironment(registry, { root, environment: {} });
   const received: string[] = [];
   const server = createRouterServer(registry, { environment, fetch: async (_input, init) => {
-    received.push(new Headers(init?.headers).get('x-api-key') ?? '');
+    const headers = new Headers(init?.headers);
+    received.push(headers.get('x-api-key') ?? headers.get('authorization')?.replace(/^Bearer /, '') ?? '');
     return new Response('{}', { headers: { 'content-type': 'application/json' } });
   } });
   try {
@@ -121,7 +122,7 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
       assert.equal(response.status, 200); await response.text();
       assert.equal(received.at(-1), environment[provider.api_key_env]);
     }
-    assert.equal(received.length, 4);
+    assert.equal(received.length, [...registry.values()].filter(({ provider }) => provider.api_key_env).length);
   } finally {
     await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     rmSync(root, { recursive: true, force: true });

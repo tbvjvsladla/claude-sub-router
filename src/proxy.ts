@@ -48,7 +48,8 @@ export function upstreamHeaders(incoming: Headers, provider: Provider, environme
   const key = environment[provider.api_key_env ?? ''] ?? '';
   if (!key.trim()) throw new RouterError(503, 'Provider API key is not configured');
   if (!/^[\x20-\x7e]+$/.test(key)) throw new RouterError(503, 'Provider API key contains invalid header characters');
-  headers.set('x-api-key', key);
+  if (provider.api_key_header === 'authorization') headers.set('authorization', `Bearer ${key}`);
+  else headers.set('x-api-key', key);
   const betas = (incoming.get('anthropic-beta') ?? '').split(',').map(value => value.trim()).filter(value => value && !value.toLowerCase().startsWith('oauth-'));
   if (betas.length) headers.set('anthropic-beta', betas.join(','));
   return headers;

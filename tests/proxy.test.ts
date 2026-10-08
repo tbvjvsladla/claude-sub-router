@@ -66,7 +66,11 @@ test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider e
         if (provider.auth === 'claude_subscription') {
           assert.equal(call.headers.authorization, 'Bearer FAKE_OAUTH'); assert.equal(call.headers['x-api-key'], undefined);
         } else {
-          assert.equal(call.headers.authorization, undefined); assert.equal(call.headers['x-api-key'], 'FAKE_PROVIDER_KEY');
+          if (provider.api_key_header === 'authorization') {
+            assert.equal(call.headers.authorization, 'Bearer FAKE_PROVIDER_KEY'); assert.equal(call.headers['x-api-key'], undefined);
+          } else {
+            assert.equal(call.headers.authorization, undefined); assert.equal(call.headers['x-api-key'], 'FAKE_PROVIDER_KEY');
+          }
           assert.equal(call.headers['anthropic-beta'], 'test-feature');
         }
         if (model.reasoning?.mode === 'omit') assert.equal(call.body.output_config, undefined);

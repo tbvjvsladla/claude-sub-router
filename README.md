@@ -1,7 +1,7 @@
 # claude-sub
 
 기존 `claude` 명령과 구독 로그인을 유지하면서 별도 `claude-sub` 환경에서
-구독 Sonnet·DeepSeek·Kimi·MiniMax M3를 선택하는 **TypeScript 로컬 라우터**입니다.
+구독 Sonnet·DeepSeek·Kimi·MiniMax M3·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
@@ -41,7 +41,8 @@ source ~/.bashrc
 claude-sub
 ```
 
-`envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY` 칸이 있습니다.
+`envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`,
+`OPENROUTER_API_KEY` 칸이 있습니다.
 MiniMax M3는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
@@ -126,6 +127,9 @@ Provider 키는 서버에서만 읽으며 `.bashrc`에 전역 export하지 않�
 `config/providers/*.yaml`이 모델 목록·기본 모델·인증·reasoning 매핑의 원본입니다.
 `default: true`는 한 모델에만 지정합니다. `upstream_model`에는 Provider가 받는
 실제 모델 ID를 사용합니다. 기본값은 구독 Sonnet이며 서드파티는 API 키 인증입니다.
+API 키는 기본적으로 `x-api-key` 헤더로 전송합니다. Bearer 인증 게이트웨이는
+`provider.api_key_header: authorization`을 지정하면 등록된 Provider 키로
+`Authorization: Bearer ...`를 만듭니다. Claude 구독 토큰을 대신 보내지 않습니다.
 
 ```yaml
 reasoning:
@@ -148,6 +152,9 @@ reasoning:
 `context.window`와 `context.auto_compact_threshold`는 모델별로 지정합니다.
 서드파티의 현재 자동 압축 설정은 800,000토큰이며 Sonnet에는 이를 강제하지 않습니다.
 설정이 실제 Provider의 최대 컨텍스트를 늘리는 것은 아닙니다.
+Claude Code의 최대 컨텍스트 환경변수는 안전을 위해 등록된 서드파티 모델의
+`context.window` 중 최솟값을 공통 상한으로 사용합니다(현재 900,000토큰).
+자동 압축 설정은 각 모델의 `auto_compact_threshold`에서 별도로 생성합니다.
 
 ### MiniMax M3
 
@@ -162,6 +169,35 @@ M3의 추론 제어는 `thinking`으로 보존합니다. 공식 Anthropic 호환
 M3.1로 모델을 임의 변경하지 않습니다.
 [MiniMax 공식 Anthropic API 문서](https://platform.minimax.io/docs/api-reference/text-anthropic-api),
 [M3 공식 모델 설명](https://github.com/MiniMax-AI/MiniMax-M3/blob/main/README.md).
+
+### OpenRouter OpenAI
+
+`config/providers/openrouter-openai.yaml`에 두 모델을 등록합니다.
+
+| Claude Code 모델 ID | OpenRouter 모델 ID | 운영 컨텍스트 | 자동 압축 설정 |
+| --- | --- | --- | --- |
+| `gpt-6.1-sol` | `openai/gpt-6.1-sol` | 900,000 | 800,000 |
+| `gpt-6-luna` | `openai/gpt-6-luna` | 900,000 | 800,000 |
+
+`envs/USA.env` 등 자동 검색되는 키 파일에 `OPENROUTER_API_KEY`를 넣으세요.
+라우터는 OpenRouter의 Anthropic 호환 `https://openrouter.ai/api/v1/messages`로
+등록된 키만 Bearer 인증하여 전송합니다. 원본 `claude` 구독 환경은 변경하지 않습니다.
+
+확인한 로컬 Hermes의 `-900k` 프리셋은 Codex OAuth용 클라이언트 별칭이며,
+OpenRouter 모델 ID가 아닙니다. 이 프로젝트에서는 요청한 900k를 **운영 상한**으로
+적용하고 upstream에는 `-900k`를 붙이지 않습니다. OpenRouter가 두 모델에 공시한
+컨텍스트는 각각 1,050,000토큰입니다. 800k 자동 압축 역시 이 프로젝트의 정책입니다.
+[GPT 6.1 Sol](https://openrouter.ai/openai/gpt-6.1-sol),
+[GPT 6 Luna](https://openrouter.ai/openai/gpt-6-luna).
+
+2026-10-08 공개 모델 메타데이터에서 두 모델 모두 `low`, `medium`, `high`, `xhigh`,
+`max`를 지원하므로 해당 다섯 단계를 각각 동일값으로 명시적으로 매핑합니다.
+Sol은 reasoning이 필수이고 Luna는 `none`도 지원하지만, 공통 Claude effort 매핑은
+reasoning을 임의로 끄지 않으며 알 수 없는 단계는 거부합니다. Anthropic 요청의
+`output_config.effort`를 매핑하고 OpenRouter가 대상 모델의 reasoning 형식으로 변환합니다.
+[공개 모델 메타데이터](https://openrouter.ai/api/v1/models),
+[reasoning 옵션 문서](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
+[Anthropic Messages API](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages).
 
 공유할 추가 Claude 설정은 `config/claude-settings.json`에 넣습니다.
 기존 로컬 `config/claude-test.json`이 있으면 이를 우선 사용하며 Git에는 포함하지 않습니다.

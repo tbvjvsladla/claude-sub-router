@@ -31,11 +31,30 @@ test('registry preserves the existing providers, defaults and YAML aliases', () 
   assert.equal(minimax.model.reasoning?.mode, 'omit');
 });
 
+test('OpenRouter GPT models preserve verified IDs, 900k policy and every supported Claude effort', () => {
+  const registry = loadRegistry();
+  for (const id of ['gpt-6.1-sol', 'gpt-6-luna']) {
+    const entry = registry.get(id)!;
+    assert.equal(entry.provider.id, 'openrouter-openai');
+    assert.equal(entry.provider.protocol, 'anthropic');
+    assert.equal(entry.provider.base_url, 'https://openrouter.ai/api');
+    assert.equal(entry.provider.api_key_env, 'OPENROUTER_API_KEY');
+    assert.equal(entry.provider.api_key_header, 'authorization');
+    assert.equal(entry.model.upstream_model, `openai/${id}`);
+    assert.deepEqual(entry.model.context, { window: 900000, auto_compact_threshold: 800000 });
+    assert.equal(entry.model.reasoning?.mode, 'map');
+    assert.deepEqual(entry.model.reasoning?.mapping, { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
+    assert.equal(entry.model.reasoning?.unsupported_level, 'error');
+  }
+  assert.deepEqual(registry.get('gpt-6.1-sol')?.model.reasoning, registry.get('gpt-6-luna')?.model.reasoning);
+});
+
 test('registry rejects duplicates, unknown fields and invalid types', () => {
   for (const modify of [
     (value: ReturnType<typeof fixture>) => value.models.push(value.models[0]!),
     (value: ReturnType<typeof fixture>) => Object.assign(value.models[0]!, { default: 'true' }),
     (value: ReturnType<typeof fixture>) => Object.assign(value.provider, { unexpected: true }),
+    (value: ReturnType<typeof fixture>) => Object.assign(value.provider, { api_key_header: 'cookie' }),
     (value: ReturnType<typeof fixture>) => Object.assign(value.models[0]!, { context: { window: 10, auto_compact_threshold: 11 } }),
     (value: ReturnType<typeof fixture>) => Object.assign(value.provider, { base_url: 'https://secret@example.test' }),
   ]) {
@@ -63,6 +82,9 @@ test('subscription configuration cannot use provider keys or another upstream', 
   assert.throws(() => registryFor(value), /subscription auth/);
   delete (value.provider as { api_key_env?: string }).api_key_env;
   assert.equal(registryFor(value).size, 1);
+  Object.assign(value.provider, { api_key_header: 'authorization' });
+  assert.throws(() => registryFor(value), /subscription auth/);
+  delete (value.provider as { api_key_header?: string }).api_key_header;
   value.provider.base_url = 'https://example.test';
   assert.throws(() => registryFor(value), /subscription auth/);
 });
@@ -90,19 +112,21 @@ test('reasoning maps every configured effort without mutating other fields', () 
 test('settings and launcher preserve unrelated values and isolate native login', () => {
   const registry = loadRegistry();
   const existing = { unrelated: true, model: 'kimi-k3', modelSettings: { 'kimi-k3': { unrelated: 'keep' } } };
-  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE' };
+  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
   const original = structuredClone({ existing, inherited });
   const { environment, settings } = buildLaunchConfig(registry, existing, inherited, '/fake-home');
   assert.equal(settings.model, 'claude-sonnet-5-5');
   assert.equal(environment.CLAUDE_CONFIG_DIR, '/fake-home/.claude-sub');
   assert.equal(environment.ANTHROPIC_DEFAULT_MODEL, settings.model);
-  assert.equal(environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  assert.equal(environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '900000');
   for (const name of Object.keys(inherited).filter(name => name !== 'PATH')) assert.equal(environment[name], undefined);
   assert.deepEqual({ existing, inherited }, original);
   const modelSettings = settings.modelSettings as Record<string, Record<string, unknown>>;
   assert.equal(modelSettings['kimi-k3']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['kimi-k3']?.unrelated, 'keep');
   assert.equal(modelSettings['minimax-m3']?.autoCompactWindow, 800000);
+  assert.equal(modelSettings['gpt-6.1-sol']?.autoCompactWindow, 800000);
+  assert.equal(modelSettings['gpt-6-luna']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['claude-sonnet-5-5'], undefined);
   assert.throws(() => buildLaunchConfig(registry, { env: {} }, {}), /must not contain/);
   assert.throws(() => buildSettings({ modelPicker: [] }, registry), /must be objects/);
@@ -136,10 +160,16 @@ test('authentication headers are split and response secrets are excluded', () =>
       assert.equal(headers.get('x-stainless-runtime'), 'node');
       assert.throws(() => upstreamHeaders(new Headers(), provider, {}), /bearer authorization/);
     } else {
-      assert.equal(headers.has('authorization'), false);
-      assert.equal(headers.get('x-api-key'), 'FAKE_PROVIDER_KEY');
+      if (provider.api_key_header === 'authorization') {
+        assert.equal(headers.get('authorization'), 'Bearer FAKE_PROVIDER_KEY');
+        assert.equal(headers.has('x-api-key'), false);
+      } else {
+        assert.equal(headers.has('authorization'), false);
+        assert.equal(headers.get('x-api-key'), 'FAKE_PROVIDER_KEY');
+      }
       assert.equal(headers.get('anthropic-beta'), 'test-feature');
       assert.throws(() => upstreamHeaders(incoming, provider, {}), /not configured/);
+      assert.throws(() => upstreamHeaders(incoming, provider, { [provider.api_key_env!]: 'FAKE\nSECRET' }), /invalid header characters/);
     }
   }
   const headers = responseHeaders(new Headers({ 'content-type': 'application/json', 'retry-after': '7', 'request-id': 'fake-id', 'anthropic-ratelimit-unified-status': 'rejected', 'authorization': 'FAKE', 'set-cookie': 'FAKE', 'content-encoding': 'gzip', 'content-length': '999' }));

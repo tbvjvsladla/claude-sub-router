@@ -14,8 +14,10 @@ repository is secret-free. Inspect the staged diff before publishing and revoke
 any previously published keys.
 
 Subscription authorization is forwarded only to the official Anthropic API.
-Provider API-key requests strip subscription authorization and OAuth beta
-headers. Upstream redirects are not followed. The router does not extract,
+Provider API-key requests strip incoming subscription authorization and OAuth beta
+headers. Bearer-authenticated providers receive a new Authorization header built
+only from their configured API key, never the incoming subscription token.
+Upstream redirects are not followed. The router does not extract,
 copy, or refresh credentials from a Claude profile. A missing or invalid provider
 key fails that model's request; requests never fall back to a different model.
 
