@@ -2,7 +2,10 @@ import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, r
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { ConfigError, loadRegistry } from './config.ts';
 import { loadProviderEnvironment } from './environment.ts';
+import { chooseBackend, inContainer, installationPath, readInstallation } from './installation.ts';
 import { buildLaunchConfig } from './launcher.ts';
+import { stopRouter } from './service.ts';
+import { standaloneProcess } from './standalone.ts';
 import { readSettings } from './settings.ts';
 import { SERVICE, checked, context, findExecutable, regularContent, shellQuote, systemdQuote, writeManaged } from './platform.ts';
 import type { Context } from './platform.ts';
@@ -46,16 +49,20 @@ function ownsUnit(content: string, ctx: Context): boolean {
   const [oldPrefix, oldSuffix] = legacy.split(quoted);
   return new RegExp(`^${escaped(oldPrefix ?? '')}${expression}${escaped(oldSuffix ?? '')}$`).test(content);
 }
-function requireUser(ctx: Context): void {
-  if (ctx.uid === 0) throw new ConfigError('Run as your normal user, not with sudo');
-  for (const command of ['bash', 'systemctl']) if (!findExecutable(command)) throw new ConfigError(`Required command not found: ${command}`);
+function requireShell(): void {
+  if (!findExecutable('bash')) throw new ConfigError('Required command not found: bash');
 }
 
-export async function install(options: Partial<Context> & { envFile?: string } = {}): Promise<void> {
+export async function install(options: Partial<Context> & { envFile?: string; service?: string } = {}): Promise<void> {
   const ctx = context(options);
-  requireUser(ctx);
+  requireShell();
   if (!ctx.claude) throw new ConfigError('Install Claude Code and add claude to PATH first');
-  await checked('systemctl', ['--user', 'list-units', '--no-legend', '--no-pager'], ctx.run);
+  const previousInstallation = readInstallation(ctx);
+  const backend = await chooseBackend(ctx, options.service ?? previousInstallation?.backend ?? 'auto');
+  const unit = join(ctx.home, '.config/systemd/user', SERVICE);
+  const registered = existsSync(join(ctx.home, '.local/bin/claude-sub')) || existsSync(unit);
+  const tracked = previousInstallation?.backend === 'standalone' && standaloneProcess(ctx);
+  if ((previousInstallation && previousInstallation.backend !== backend && (registered || tracked)) || (backend === 'standalone' && existsSync(unit))) throw new ConfigError('Uninstall the existing service before switching service backends');
   const registry = loadRegistry(join(ctx.root, 'config/providers'));
   buildLaunchConfig(registry, readSettings(ctx.root), process.env);
   const bashrc = join(ctx.home, '.bashrc');
@@ -73,17 +80,22 @@ export async function install(options: Partial<Context> & { envFile?: string } =
   }
   writeManaged(join(ctx.home, '.local/bin/claude-sub'), commandWrapper('launch', ctx), 0o755);
   writeManaged(join(ctx.home, '.local/bin/claude-sub-router'), commandWrapper('router', ctx), 0o755);
-  writeManaged(join(ctx.home, '.config/systemd/user', SERVICE), serviceUnit(envFile ?? '--auto', ctx), 0o600);
+  writeManaged(installationPath(ctx), `${JSON.stringify({ backend, root: ctx.root, node: ctx.node, ...(envFile ? { envFile } : {}) }, null, 2)}\n`, 0o600);
+  if (backend === 'systemd') writeManaged(unit, serviceUnit(envFile ?? '--auto', ctx), 0o600);
   writeManaged(bashrc, updated, mode, true);
-  await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
-  await checked('systemctl', ['--user', 'enable', SERVICE], ctx.run);
+  if (backend === 'systemd') {
+    await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
+    await checked('systemctl', ['--user', 'enable', SERVICE], ctx.run);
+  }
   await checked(ctx.node, [join(ctx.root, 'dist/cli.js'), 'router', 'restart'], ctx.run);
-  console.log('Installation complete. Run: source ~/.bashrc\nThen: claude-sub\nClaude login, plugins and sessions use the same profile as native claude.');
+  console.log(`Installation complete (${backend}). Run: source ${shellQuote(join(ctx.root, 'env.bash'))}\nThen: claude-sub\nClaude login, plugins and sessions use the same profile as native claude.`);
 }
 
 export async function uninstall(options: Partial<Context> & { dryRun?: boolean } = {}): Promise<void> {
   const ctx = context(options);
-  requireUser(ctx);
+  requireShell();
+  const backend = readInstallation(ctx)?.backend ?? (ctx.uid === 0 && inContainer() ? 'standalone' : 'systemd');
+  if (backend === 'systemd' && ctx.uid === 0) throw new ConfigError('Run as your normal user, not with sudo');
   const paths: string[] = [];
   for (const [name, action] of [['claude-sub', 'launch'], ['claude-sub-router', 'router']] as const) {
     const path = join(ctx.home, '.local/bin', name);
@@ -110,14 +122,15 @@ export async function uninstall(options: Partial<Context> & { dryRun?: boolean }
   const existing = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
   const updated = removeBashrcBlock(existing);
   if (options.dryRun) {
-    console.log(`Would stop and disable ${SERVICE}`);
+    console.log(backend === 'standalone' ? 'Would stop the standalone router' : `Would stop and disable ${SERVICE}`);
     for (const path of paths) console.log(`Would remove: ${path}`);
     if (enabledLink) console.log(`Would remove: ${enabled}`);
     if (updated !== existing) console.log(`Would back up and remove only the managed block from: ${bashrc}`);
     console.log('Native Claude, both profiles, credentials, sessions, project files and backups are preserved.');
     return;
   }
-  if (unitContent !== undefined) await checked('systemctl', ['--user', 'disable', '--now', SERVICE], ctx.run);
+  if (backend === 'standalone') await stopRouter(ctx);
+  else if (unitContent !== undefined) await checked('systemctl', ['--user', 'disable', '--now', SERVICE], ctx.run);
   else {
     const state = await ctx.run('systemctl', ['--user', 'show', SERVICE, '--property=LoadState', '--property=ActiveState']);
     if (!state.stdout.includes('LoadState=not-found') || !state.stdout.includes('ActiveState=inactive')) throw new ConfigError('Service file missing but manager still knows a service. Check systemctl --user status claude-sub-router.service.');
@@ -125,7 +138,9 @@ export async function uninstall(options: Partial<Context> & { dryRun?: boolean }
   if (updated !== existing) writeManaged(bashrc, updated, lstatSync(lstatSync(bashrc).isSymbolicLink() ? realpathSync(bashrc) : bashrc).mode & 0o777, true);
   try { if (lstatSync(enabled).isSymbolicLink()) unlinkSync(enabled); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   for (const path of paths) { unlinkSync(path); console.log(`Removed: ${path}`); }
-  await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
-  await ctx.run('systemctl', ['--user', 'reset-failed', SERVICE]);
+  if (backend === 'systemd') {
+    await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
+    await ctx.run('systemctl', ['--user', 'reset-failed', SERVICE]);
+  }
   console.log('Uninstallation complete. User data was preserved. Run: hash -r');
 }

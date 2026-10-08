@@ -2,8 +2,10 @@ import { createConnection } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { ConfigError, isObject, loadRegistry } from './config.ts';
 import type { Registry } from './config.ts';
-import { BASE_URL, HOST, PORT, SERVICE, checked, run } from './platform.ts';
-import type { Runner } from './platform.ts';
+import { readInstallation } from './installation.ts';
+import { BASE_URL, HOST, PORT, SERVICE, checked, context, run } from './platform.ts';
+import type { CommandResult, Context, Runner } from './platform.ts';
+import { logPath, spawnStandalone, standaloneLogs, standaloneProcess, stopStandalone, withStandaloneLock } from './standalone.ts';
 
 export async function serviceActive(runner: Runner = run): Promise<boolean> {
   return (await runner('systemctl', ['--user', 'is-active', '--quiet', SERVICE])).code === 0;
@@ -38,8 +40,27 @@ export async function waitForRouter(registry: Registry, options: { fetch?: typeo
   }
   throw new ConfigError(`Router not ready at ${BASE_URL}. Run claude-sub-router logs.`);
 }
-export async function startRouter(registry = loadRegistry(), restart = false, options: { runner?: Runner; busy?: () => Promise<boolean>; wait?: (registry: Registry) => Promise<void> } = {}): Promise<void> {
-  const runner = options.runner ?? run;
+export async function startRouter(registry = loadRegistry(), restart = false, options: { ctx?: Context; runner?: Runner; busy?: () => Promise<boolean>; wait?: (registry: Registry) => Promise<void> } = {}): Promise<void> {
+  const ctx = options.ctx ?? context();
+  const installation = readInstallation(ctx);
+  const runner = options.runner ?? ctx.run;
+  if (installation?.backend === 'standalone') {
+    await withStandaloneLock(ctx, async () => {
+      const active = () => Promise.resolve(!!standaloneProcess(ctx));
+      if (restart) await stopStandalone(ctx);
+      const alreadyRunning = await active();
+      if (!alreadyRunning) {
+        if (await (options.busy ?? portBusy)()) throw new ConfigError(`${HOST}:${PORT} is already in use. Stop the manually started server or conflicting application first.`);
+        await spawnStandalone(ctx, installation);
+      }
+      try { await (options.wait ?? ((models: Registry) => waitForRouter(models, { active })))(registry); }
+      catch (error) {
+        if (!alreadyRunning) await stopStandalone(ctx);
+        throw error;
+      }
+    });
+    return;
+  }
   const active = await serviceActive(runner);
   if (!active && await (options.busy ?? portBusy)()) throw new ConfigError(`${HOST}:${PORT} is already in use. Stop the manually started server or conflicting application first.`);
   if (restart) {
@@ -47,4 +68,18 @@ export async function startRouter(registry = loadRegistry(), restart = false, op
     await checked('systemctl', ['--user', 'restart', SERVICE], runner);
   } else if (!active) await checked('systemctl', ['--user', 'start', SERVICE], runner);
   await (options.wait ?? waitForRouter)(registry);
+}
+
+export async function stopRouter(ctx = context()): Promise<void> {
+  if (readInstallation(ctx)?.backend === 'standalone') {
+    await withStandaloneLock(ctx, () => stopStandalone(ctx));
+  } else await checked('systemctl', ['--user', 'stop', SERVICE], ctx.run);
+}
+
+export async function routerReport(action: 'status' | 'logs', ctx = context()): Promise<CommandResult> {
+  if (readInstallation(ctx)?.backend === 'standalone') {
+    const process = standaloneProcess(ctx);
+    return { code: action === 'logs' || process ? 0 : 3, stderr: '', stdout: action === 'logs' ? standaloneLogs(ctx) : `${JSON.stringify({ backend: 'standalone', status: process ? 'running' : 'stopped', pid: process?.pid ?? null, base_url: BASE_URL, log_file: logPath(ctx) }, null, 2)}\n` };
+  }
+  return action === 'status' ? ctx.run('systemctl', ['--user', 'status', '--no-pager', SERVICE]) : ctx.run('journalctl', ['--user', '--unit', SERVICE, '--lines=100', '--no-pager']);
 }

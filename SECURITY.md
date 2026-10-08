@@ -32,6 +32,14 @@ hooks, permissions and session history. An inherited `CLAUDE_CONFIG_DIR` is
 respected. Routing overrides apply only to the launched process; the launcher
 does not write them to user settings. Changes saved from Claude's own settings
 menus affect the shared profile and therefore both commands.
+Root Docker containers can use the standalone backend without a user systemd
+manager. Ordinary host installations still reject accidental sudo use by default.
+Standalone state and logs are private to the installing account. Stop/restart
+verify both the PID's Linux start time and router command before sending a signal,
+and startup refuses a port occupied by an untracked process. Standalone processes
+survive SSH disconnects but do not restart themselves after a crash or container
+restart; launching `claude-sub` starts a stopped router again. Logs accumulate
+in `~/.local/state/claude-sub-router/router.log` until the user rotates them.
 Both systemd and direct execution parse `envs/*.env` with Node's dotenv parser;
 they never source these files as shell scripts or expand commands/variables.
 Only keys named by registered providers' `api_key_env` fields are imported.

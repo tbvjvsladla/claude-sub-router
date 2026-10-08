@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { ConfigError, loadRegistry } from './config.ts';
 import { loadProviderEnvironment } from './environment.ts';
-import { HOST, PORT, SERVICE, checked, run } from './platform.ts';
+import { HOST, PORT } from './platform.ts';
 import { createRouterServer } from './proxy.ts';
 import { launch } from './launcher.ts';
 import { install, uninstall } from './lifecycle.ts';
-import { startRouter } from './service.ts';
+import { routerReport, startRouter, stopRouter } from './service.ts';
 import { buildSettings, readSettings } from './settings.ts';
 
 function option(args: string[], name: string): string | undefined {
@@ -27,24 +27,24 @@ function validateOptions(args: string[], values: string[], switches: string[] = 
 async function main(): Promise<number> {
   const [action, ...args] = process.argv.slice(2);
   if (!action || action === '--help') {
-    console.log('claude-sub-router: serve | launch [Claude arguments] | router start|restart|stop|status|logs | install [--env-file PATH] | uninstall [--dry-run] | models');
+    console.log('claude-sub-router: serve | launch [Claude arguments] | router start|restart|stop|status|logs | install [--env-file PATH] [--service auto|systemd|standalone] | uninstall [--dry-run] | models');
     return 0;
   }
   if (action === 'launch') return launch(args);
   if (args.includes('--help')) {
-    console.log(action === 'install' ? 'install [--env-file PATH]' : action === 'uninstall' ? 'uninstall [--dry-run] (preserves keys and profiles)' : 'serve [--env-file PATH] [--port 18765] | router start|restart|stop|status|logs');
+    console.log(action === 'install' ? 'install [--env-file PATH] [--service auto|systemd|standalone]' : action === 'uninstall' ? 'uninstall [--dry-run] (preserves keys and profiles)' : 'serve [--env-file PATH] [--port 18765] | router start|restart|stop|status|logs');
     return 0;
   }
   if (action === 'models') { console.log(JSON.stringify(buildSettings(readSettings(), loadRegistry()), null, 2)); return 0; }
-  if (action === 'install') { validateOptions(args, ['--env-file']); await install({ envFile: option(args, '--env-file') }); return 0; }
+  if (action === 'install') { validateOptions(args, ['--env-file', '--service']); await install({ envFile: option(args, '--env-file'), service: option(args, '--service') }); return 0; }
   if (action === 'uninstall') { validateOptions(args, [], ['--dry-run']); await uninstall({ dryRun: args.includes('--dry-run') }); return 0; }
   if (action === 'router') {
     if (args.length !== 1) throw new ConfigError('Specify exactly one router action');
     const command = args[0];
     if (command === 'start' || command === 'restart') { await startRouter(undefined, command === 'restart'); console.log(`Router ready: http://${HOST}:${PORT}`); return 0; }
-    if (command === 'stop') { await checked('systemctl', ['--user', 'stop', SERVICE]); return 0; }
+    if (command === 'stop') { await stopRouter(); return 0; }
     if (command === 'status' || command === 'logs') {
-      const result = command === 'status' ? await run('systemctl', ['--user', 'status', '--no-pager', SERVICE]) : await run('journalctl', ['--user', '--unit', SERVICE, '--lines=100', '--no-pager']);
+      const result = await routerReport(command);
       process.stdout.write(result.stdout); process.stderr.write(result.stderr); return result.code;
     }
     throw new ConfigError('Use claude-sub-router start|restart|stop|status|logs');

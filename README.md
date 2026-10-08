@@ -6,20 +6,21 @@ Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
 
-배포 대상은 **일반 Ubuntu와 WSL2 Ubuntu**입니다. 기본 설치는 Docker 없이
+배포 대상은 **일반 Ubuntu, WSL2 Ubuntu, Vast.ai 같은 Linux Docker 컨테이너**입니다. 기본 설치는
 호스트의 Node.js에서 라우터를 직접 실행합니다. Rust 구현이나 Rust 바이너리가 아닙니다.
 
 ```text
-claude-sub → 로컬 라우터(Node.js / systemd 사용자 서비스) → Provider API
+claude-sub → 로컬 라우터(Node.js / systemd 또는 백그라운드 프로세스) → Provider API
 claude     → 기존 Claude Code 구독 환경
 ```
 
-`.bashrc`는 명령을 찾기 위한 PATH만 등록하고, systemd가 라우터 시작·재시작·로그를
-관리합니다. 셸을 열 때마다 서버를 새로 띄우지 않습니다. 일반 Ubuntu에서는 사용자
-로그인 시, WSL에서는 배포판과 사용자 세션이 실행되는 동안 동작합니다.
+`.bashrc`는 명령을 찾기 위한 PATH만 등록합니다. 사용자 systemd가 동작하면 기존처럼
+systemd 서비스를 설치하고, 사용할 수 없으면 `standalone` 방식으로 실행합니다.
+root 컨테이너는 자동으로 `standalone`을 선택합니다. 셸을 열 때마다 서버를 새로 띄우지 않습니다.
+systemd 설치는 사용자 로그인 시, WSL에서는 배포판과 사용자 세션이 실행되는 동안 동작합니다.
 라우터는 LLM 자체를 호스팅하지 않고 외부 API로 요청을 전달합니다.
 
-WSL2에서도 systemd와 사용자 서비스 관리자가 필요합니다. 설치 전
+WSL2에서 systemd 방식을 사용하려면 설치 전
 `systemctl --user list-units --no-pager`가 성공해야 합니다. systemd가 꺼진 WSL2는
 `/etc/wsl.conf`에 `[boot]` 아래 `systemd=true`를 추가하고 Windows에서
 `wsl.exe --shutdown` 후 다시 실행하세요. 기존 설정을 덮어쓰지 마세요.
@@ -28,8 +29,9 @@ systemd 서비스만으로 WSL 인스턴스가 계속 살아 있는 것은 아�
 
 ## 설치
 
-Ubuntu의 일반 사용자 계정, 사용자 systemd, Node.js **22.18.0 이상**, npm,
-설치된 Claude Code가 필요합니다. `sudo`는 사용하지 않습니다.
+Node.js **22.18.0 이상**, npm, bash, 설치된 Claude Code가 필요합니다.
+일반 Ubuntu에서는 일반 사용자 계정으로 설치하며 `sudo`는 사용하지 않습니다.
+Vast.ai 같은 root 컨테이너에서는 해당 root 계정으로 설치할 수 있습니다.
 
 ```bash
 cd claude-router
@@ -37,7 +39,7 @@ cp envs/.env.example envs/keys.env
 chmod 600 envs/keys.env
 nano envs/keys.env
 bash install.sh
-source ~/.bashrc
+source ./env.bash
 claude-sub
 ```
 
@@ -85,11 +87,35 @@ DeepSeek 모델, `MOONSHOT_API_KEY`는 Kimi 모델에서 참조합니다. 키를
 - 키 파일을 추가·수정한 뒤 `claude-sub-router restart`로 반영합니다.
   `chmod 600 envs/*.env`로 키 파일 접근 권한을 제한하세요.
 
-설치기는 의존성 설치·컴파일, 두 명령 등록, `.bashrc` 관리 블록 등록,
-사용자 systemd 서비스의 로그인 자동 시작과 즉시 기동을 처리합니다.
+설치기는 의존성 설치·컴파일, 두 명령 등록, `.bashrc` 관리 블록 등록과 라우터 즉시 기동을
+처리합니다. systemd 방식은 사용자 서비스의 로그인 자동 시작도 등록합니다.
 변경되는 기존 파일은 타임스탬프 `.bak`로 백업합니다. 재부팅은 필요하지 않습니다.
 수동 라우터가 실행 중이면 먼저 종료하세요. 설치 폴더를 옮기면 재설치해야 합니다.
 재설치는 서버를 재시작하므로 진행 중인 요청이 없을 때 실행하세요.
+
+### Vast.ai 등 systemd 없는 컨테이너
+
+```bash
+cd /workspace/claude-sub-router
+bash install.sh --service standalone
+source ./env.bash
+claude-sub-router status
+claude-sub
+```
+
+`--service auto`가 기본값이며 `systemd`와 `standalone`을 명시할 수도 있습니다.
+원본 Claude의 같은 사용자 프로필(root라면 `/root/.claude`)을 공유합니다.
+`source ./env.bash`는 Vast.ai의 자동 tmux 진입 등 기존 `.bashrc` 동작을 다시 실행하지 않고
+현재 셸에 명령 경로만 추가합니다. 추가 Supervisor나 tmux 설정은 필요하지 않습니다.
+
+`standalone` 라우터는 터미널에서 분리되어 SSH 접속을 끊어도 유지됩니다.
+`start/restart/stop/status/logs` 명령은 두 방식에서 동일하게 사용할 수 있습니다.
+상태·로그·설치 정보는 `~/.local/state/claude-sub-router/`에 저장하며, 다른 프로그램이나
+수동으로 실행한 서버를 자동으로 종료하지 않습니다.
+컨테이너 재시작 또는 라우터 종료 후에는 `claude-sub` 실행 시 다시 시작합니다.
+로그인 시 자동 시작이나 비정상 종료 직후의 자동 재시작은 systemd 방식에서 지원합니다.
+standalone 로그는 `router.log`에 누적되며 `logs`는 최근 100줄(최대 64KiB)을 표시합니다.
+컨테이너 자체가 종료되면 라우터도 종료됩니다.
 
 ## 사용 및 관리
 
@@ -309,7 +335,8 @@ bash uninstall.sh
 hash -r
 ```
 
-서비스 중지·자동 시작 해제, 두 명령·서비스 파일, `.bashrc` 관리 블록만 제거합니다.
+선택한 방식의 라우터를 중지하고 두 명령과 `.bashrc` 관리 블록을 제거합니다.
+systemd 방식은 자동 시작과 서비스 파일도 제거합니다. standalone 로그와 설치 정보는 보존합니다.
 기존 Python 설치 항목도 인식하며, 수정된 파일이나 다른 경로의 설치는 안전을 위해 거부합니다.
 원본 `claude`, 두 프로필의 로그인·설정·대화, 키 파일, 프로젝트와 백업은 삭제하지 않습니다.
 재설치하려면 `bash install.sh`를 다시 실행하세요.
