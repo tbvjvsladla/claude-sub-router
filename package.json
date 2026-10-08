@@ -29,7 +29,7 @@
     "scripts/run-router.sh",
     "README.md",
     "SECURITY.md",
-    ".env.example"
+    "envs/.env.example"
   ],
   "dependencies": {
     "yaml": "2.9.1"

@@ -44,18 +44,20 @@ test('install/uninstall round trip preserves native Claude, credentials and user
     mkdirSync(root, { recursive: true }); mkdirSync(home);
     cpSync(join(ROOT, 'config/providers'), join(root, 'config/providers'), { recursive: true });
     writeFileSync(join(root, 'config/claude-settings.json'), '{}');
-    cpSync(join(ROOT, '.env.example'), join(root, '.env.example'));
+    mkdirSync(join(root, 'envs')); cpSync(join(ROOT, 'envs/.env.example'), join(root, 'envs/.env.example'));
     mkdirSync(join(root, 'scripts')); cpSync(join(ROOT, 'scripts/run-router.sh'), join(root, 'scripts/run-router.sh'));
     writeFileSync(join(home, '.bashrc'), 'export KEEP=1\nlegacy-provider() { :; }\n', { mode: 0o600 });
     const preserved = ['.claude/.credentials.json', '.claude-sub/.credentials.json', '.claude-sub/projects/session.json', '.local/bin/claude', '.config/keys.env'];
     for (const path of preserved) { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), 'FAKE_PRESERVED_DATA'); }
     await install(ctx);
-    assert.equal(lstatSync(join(root, '.env')).mode & 0o777, 0o600);
+    assert.equal(lstatSync(join(root, 'envs/keys.env')).mode & 0o777, 0o600);
+    assert.equal(existsSync(join(root, '.env')), false);
     const bashrc = readFileSync(join(home, '.bashrc'), 'utf8');
     await install(ctx);
     assert.equal(readFileSync(join(home, '.bashrc'), 'utf8'), bashrc);
     assert.equal(readFileSync(join(home, '.local/bin/claude-sub'), 'utf8'), commandWrapper('launch', ctx));
     const unit = join(home, '.config/systemd/user', SERVICE);
+    assert.equal(readFileSync(unit, 'utf8'), serviceUnit('--auto', ctx));
     const runtime = join(directory, 'runtime'); mkdirSync(runtime, { mode: 0o700 });
     execFileSync('systemd-analyze', ['--user', 'verify', unit], { stdio: 'pipe', env: { ...process.env, XDG_RUNTIME_DIR: runtime } });
     const enabled = join(dirname(unit), 'default.target.wants', SERVICE);
@@ -73,8 +75,40 @@ test('install/uninstall round trip preserves native Claude, credentials and user
     assert.equal(existsSync(unit), false); assert.equal(existsSync(wrapper), false);
     assert.equal(readFileSync(join(home, '.bashrc'), 'utf8').includes('# >>> claude-sub >>>'), false);
     assert.ok(readFileSync(join(home, '.bashrc'), 'utf8').includes('legacy-provider()'));
+    assert.ok(existsSync(join(root, 'envs/keys.env')));
     for (const path of preserved) assert.equal(readFileSync(join(home, path), 'utf8'), 'FAKE_PRESERVED_DATA');
     await uninstall(ctx);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('install preserves grouped key files, migrates single-file services and validates conflicts before writes', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'claude-sub-env-install-'));
+  const root = join(directory, 'project'); const home = join(directory, 'home');
+  const calls: string[][] = [];
+  const runner: Runner = async (command, args) => { calls.push([command, ...args]); return { code: 0, stdout: '', stderr: '' }; };
+  const ctx = context({ root, home, uid: 1000, run: runner, claude: '/fake/claude' });
+  try {
+    cpSync(join(ROOT, 'config/providers'), join(root, 'config/providers'), { recursive: true });
+    writeFileSync(join(root, 'config/claude-settings.json'), '{}');
+    mkdirSync(join(root, 'envs')); mkdirSync(home);
+    const china = join(root, 'envs/CHINA.env'); const usa = join(root, 'envs/USA.env');
+    writeFileSync(china, 'DEEPSEEK_API_KEY=FAKE_CHINA', { mode: 0o600 });
+    writeFileSync(usa, 'MOONSHOT_API_KEY=FAKE_USA', { mode: 0o600 });
+    const unit = join(home, '.config/systemd/user', SERVICE); mkdirSync(dirname(unit), { recursive: true });
+    writeFileSync(unit, serviceUnit(china, ctx));
+    await install(ctx);
+    assert.equal(readFileSync(unit, 'utf8'), serviceUnit('--auto', ctx));
+    assert.equal(existsSync(join(root, 'envs/keys.env')), false);
+    assert.equal(readFileSync(china, 'utf8'), 'DEEPSEEK_API_KEY=FAKE_CHINA');
+    assert.equal(readFileSync(usa, 'utf8'), 'MOONSHOT_API_KEY=FAKE_USA');
+    await install({ ...ctx, envFile: china });
+    assert.equal(readFileSync(unit, 'utf8'), serviceUnit(china, ctx));
+    const previous = readFileSync(join(home, '.bashrc'), 'utf8');
+    writeFileSync(usa, 'DEEPSEEK_API_KEY=FAKE_CONFLICT'); calls.length = 0;
+    await assert.rejects(() => install(ctx), /Conflicting DEEPSEEK_API_KEY/);
+    assert.equal(readFileSync(unit, 'utf8'), serviceUnit(china, ctx));
+    assert.equal(readFileSync(join(home, '.bashrc'), 'utf8'), previous);
+    assert.equal(calls.some(args => args.includes('restart')), false);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

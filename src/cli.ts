@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
-import { parseEnv } from 'node:util';
 import { ConfigError, loadRegistry } from './config.ts';
+import { loadProviderEnvironment } from './environment.ts';
 import { HOST, PORT, SERVICE, checked, run } from './platform.ts';
 import { createRouterServer } from './proxy.ts';
 import { launch } from './launcher.ts';
@@ -52,14 +51,13 @@ async function main(): Promise<number> {
   }
   if (action !== 'serve') throw new ConfigError(`Unknown command: ${action}`);
   validateOptions(args, ['--env-file', '--port']);
-  const envFile = option(args, '--env-file');
-  if (envFile && existsSync(envFile)) {
-    for (const [name, value] of Object.entries(parseEnv(readFileSync(envFile, 'utf8')))) process.env[name] ??= value;
-  } else if (envFile) console.warn('Provider environment file is missing; provider calls may fail.');
   const registry = loadRegistry();
+  const { environment, files } = loadProviderEnvironment(registry, { envFile: option(args, '--env-file') });
+  if (!files.length) console.warn('No provider environment files found; using inherited keys, otherwise provider calls may fail.');
+  else console.log(`Provider environment files: ${files.length} (values omitted)`);
   const port = Number(option(args, '--port') ?? PORT);
   if (!Number.isInteger(port) || port < 10000 || port > 65535) throw new ConfigError('port must be an integer from 10000 to 65535');
-  const server = createRouterServer(registry, { log: (event, metadata) => console.log(`${event} ${JSON.stringify(metadata)}`) });
+  const server = createRouterServer(registry, { environment, log: (event, metadata) => console.log(`${event} ${JSON.stringify(metadata)}`) });
   server.on('error', error => { console.error(`Router failed to listen (${(error as NodeJS.ErrnoException).code ?? 'error'})`); process.exitCode = 1; });
   server.listen(port, HOST, () => console.log(`Router ready: http://${HOST}:${port} (typescript; no local authentication)`));
   let stopping = false;

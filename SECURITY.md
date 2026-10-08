@@ -6,7 +6,8 @@ consume provider credits. Do not expose it through a public interface, reverse
 proxy, SSH tunnel, or container port mapping without adding access controls.
 
 Keep API keys in a trusted environment file readable only by its owner
-(`chmod 600 .env`). Never commit `.env`, `envs/`, credentials, or personal Claude
+(`chmod 600 envs/*.env`). Only the empty `envs/.env.example` template is public.
+Never commit actual `*.env` files, other `envs/` contents, credentials, or personal Claude
 settings. `.gitignore`, `.dockerignore`, release allowlists, and
 `npm run check:secrets` reduce accidental publication but cannot prove that a
 repository is secret-free. Inspect the staged diff before publishing and revoke
@@ -24,6 +25,14 @@ Tests still consume real subscription/API quotas when explicitly invoked.
 
 Install and uninstall leave the original `claude` binary and `~/.claude` profile
 untouched. They also retain `~/.claude-sub`, provider key files, and backups.
-The systemd launcher sources its environment file with Bash, so that file must
-be trusted: shell commands in it execute as the current user. Direct
-`node dist/cli.js serve --env-file .env` uses Node's dotenv parser instead.
+Both systemd and direct execution parse `envs/*.env` with Node's dotenv parser;
+they never source these files as shell scripts or expand commands/variables.
+Only keys named by registered providers' `api_key_env` fields are imported.
+Symlinked environment files are rejected. Conflicting nonempty definitions of
+the same provider key across files stop startup without printing their values.
+Identical definitions are allowed and empty values are ignored. Nonempty inherited
+environment variables take precedence, but do not bypass file-conflict checks.
+An explicit `--env-file` loads only that file. With no discovered files, the root
+`.env` is a backward-compatible fallback. Missing keys still fail only the
+corresponding provider request. Protect the project directory and its key files
+from untrusted writers.

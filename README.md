@@ -33,25 +33,56 @@ Ubuntu의 일반 사용자 계정, 사용자 systemd, Node.js **22.18.0 이상**
 
 ```bash
 cd claude-router
-cp .env.example .env
-chmod 600 .env
-nano .env
+cp envs/.env.example envs/keys.env
+chmod 600 envs/keys.env
+nano envs/keys.env
 bash install.sh
 source ~/.bashrc
 claude-sub
 ```
 
-`.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY` 칸이 있습니다.
+`envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY` 칸이 있습니다.
 MiniMax M3는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
-기존 사용자는 빈 `.env`를 만들 필요가 없습니다. 설치기는 `.env`, 기존
-`envs/CHINA_provider.env` 순서로 선택하고, 둘 다 없을 때만 예제 파일을 복사합니다.
-다른 키 파일도 지정할 수 있습니다.
+기존 사용자는 키 파일을 다시 만들 필요가 없습니다. 기본 설치는 `envs/*.env`를 모두
+자동으로 읽으며, 기존 `CHINA_provider.env`, `USA_provider.env` 같은 이름도 지원합니다.
+키 파일이 하나도 없으면 기존 루트 `.env`를 사용하고, 그것도 없을 때만 예제를
+`envs/keys.env`로 복사합니다(권한 `600`). 기존 파일을 덮어쓰지 않습니다.
+이전 단일 파일 서비스에서 자동 검색으로 전환하려면 `bash install.sh`를 한 번 다시 실행하세요.
+자동 검색 대신 특정 파일만 사용하도록 지정할 수도 있습니다.
 
 ```bash
 bash install.sh --env-file "$HOME/.config/claude-providers/keys.env"
 ```
+
+### 키 파일 구성
+
+한 파일에 모든 키를 넣어도 되고, 관리하기 편하게 여러 파일로 나누어도 됩니다.
+
+```text
+envs/
+├── .env.example    # 공개되는 빈 예제; 읽지 않음
+├── CHINA.env       # 개인 키; 자동 로딩; Git 제외
+└── USA.env         # 개인 키; 자동 로딩; Git 제외
+```
+
+파일명이나 국가명은 모델 연결에 영향을 주지 않습니다. `config/providers/*.yaml`의
+`provider.api_key_env`와 변수 이름이 일치해야 합니다. 예를 들어 `DEEPSEEK_API_KEY`는
+DeepSeek 모델, `MOONSHOT_API_KEY`는 Kimi 모델에서 참조합니다. 키를 추가하는 것만으로
+새 모델이 등록되지는 않습니다. Meta 등 다른 Provider도 지원하려면 별도 YAML과
+현재 라우터가 지원하는 Anthropic 호환 API가 필요합니다.
+
+- 시작할 때 `envs/` 바로 아래의 `*.env` 파일을 파일명 순서로 읽습니다. 하위 폴더,
+  `.env.example`, `.bak` 파일은 읽지 않으며 심볼릭 링크는 거부합니다.
+- 같은 키에 서로 다른 값이 있으면 시작·재설치를 거부하고 변수명과 파일 경로만 알립니다.
+  동일한 값의 중복은 허용하고 빈 값은 무시합니다. 파일 순서로 키를 덮어쓰지 않습니다.
+- 외부에서 이미 설정한 비어 있지 않은 환경변수가 파일 값보다 우선합니다.
+  다만 파일 간 충돌은 환경변수가 있더라도 수정해야 합니다.
+- YAML에 등록된 `api_key_env`만 불러옵니다. dotenv 형식의 리터럴 값을 쓰세요.
+  `export KEY=value`는 허용하지만 `${VARIABLE}` 치환이나 셸 명령 실행은 하지 않습니다.
+- 키 파일을 추가·수정한 뒤 `claude-sub-router restart`로 반영합니다.
+  `chmod 600 envs/*.env`로 키 파일 접근 권한을 제한하세요.
 
 설치기는 의존성 설치·컴파일, 두 명령 등록, `.bashrc` 관리 블록 등록,
 사용자 systemd 서비스의 로그인 자동 시작과 즉시 기동을 처리합니다.
@@ -84,7 +115,7 @@ YAML이나 키 파일 수정 후에는 라우터를 재시작하고 Claude Code�
 Provider 키는 서버에서만 읽으며 `.bashrc`에 전역 export하지 않습니다.
 키 파일이 없거나 비어 있어도 서버는 시작하며 해당 모델 호출만 실패합니다.
 잘못된 키는 Provider의 인증 오류를 그대로 반환하고 다른 모델로 대체하지 않습니다.
-systemd 실행기는 환경 파일을 Bash로 읽으므로 신뢰하는 파일만 사용하세요.
+수동 실행과 systemd 실행 모두 Node의 dotenv 파서를 사용하며 키 파일을 셸로 실행하지 않습니다.
 
 구독 Sonnet은 **`~/.claude-sub`**의 Claude Code 로그인을 사용합니다.
 필요하면 `claude-sub`에서 로그인하세요. 기존 `claude`, `~/.claude`의 로그인·설정은
@@ -144,8 +175,11 @@ npm run check
 npm test
 npm run build
 node dist/cli.js launch --check
-node dist/cli.js serve --env-file .env
+node dist/cli.js serve
 ```
+
+수동 실행도 `envs/*.env`를 자동으로 읽습니다. `serve --env-file /path/to/keys.env`는
+지정한 파일만 읽으며 자동 검색과 루트 `.env` fallback을 사용하지 않습니다.
 
 테스트는 임시 디렉터리·가짜 upstream을 사용하고 실제 키나 구독을 소비하지 않습니다.
 설치·삭제, 모델 검증, 인증 분리, JSON/SSE, 오류 전달, 취소·스트리밍을 검증합니다.
@@ -181,7 +215,8 @@ npm run package:release
 npm run test:release
 ```
 
-`.env`, `envs/`, 사용자 프로필, 개인 설정, 백업, `.venv`, `node_modules`는 Git에서 제외합니다.
+`envs/.env.example`만 Git과 배포 파일에 포함합니다. 실제 `*.env`, 루트 `.env`,
+그 밖의 `envs/` 내용, 사용자 프로필, 개인 설정, 백업, `.venv`, `node_modules`는 제외합니다.
 스캐너는 일반적인 토큰 형태를 검사하지만 모든 비밀정보를 보장하지 않으므로
 업로드 전에 staged diff를 직접 확인하세요. 실제 키를 Git에 추가하지 마세요.
 
@@ -205,7 +240,7 @@ Docker를 사용하지 않습니다. 컨테이너를 원하지 않으면 아래 
 
 ```bash
 docker build -t claude-sub-router .
-docker run --rm --network host --env-file .env claude-sub-router
+docker run --rm --network host --env-file envs/keys.env claude-sub-router
 ```
 
 Docker 실행은 Claude Code 설치나 구독 로그인을 대신하지 않습니다.

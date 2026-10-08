@@ -14,6 +14,7 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY config/providers ./config/providers
 COPY config/claude-settings.json ./config/claude-settings.json
+COPY envs/.env.example ./envs/.env.example
 USER node
 HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:18765/health').then(response=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/cli.js", "serve"]

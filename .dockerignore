@@ -3,10 +3,12 @@ node_modules
 dist
 artifacts
 .venv
-envs
+envs/*
 .env
 .env.*
+*.env
 !.env.example
+!envs/.env.example
 **/__pycache__
 **/*.py
 **/*.bak

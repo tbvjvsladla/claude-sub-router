@@ -21,9 +21,11 @@ try {
   for (const file of files) {
     const path = file.slice(name.length + 1);
     assert.ok(file.startsWith(`${name}/`) && !path.split('/').includes('..'));
-    assert.equal(/(^|\/)(?:envs|src|node_modules|\.git|\.venv|\.claude(?:-sub)?)(?:\/|$)|credentials|\.bak$|claude-test\.json$/.test(path), false);
-    if (/(^|\/)\.env(?:\.|$)/.test(path)) assert.equal(path, '.env.example');
+    assert.equal(/(^|\/)(?:src|node_modules|\.git|\.venv|\.claude(?:-sub)?)(?:\/|$)|credentials|\.bak$|claude-test\.json$/.test(path), false);
+    if (path.startsWith('envs/')) assert.ok(['envs/', 'envs/.env.example'].includes(path));
+    if (/(^|\/)\.env(?:\.|$)|\.env$/.test(path)) assert.equal(path, 'envs/.env.example');
   }
+  assert.ok(files.includes(`${name}/envs/.env.example`));
   execFileSync('tar', ['-xzf', archive, '-C', temporary]);
   const project = join(temporary, name);
   execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: project, stdio: 'pipe', timeout: 120000 });

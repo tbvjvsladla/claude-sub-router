@@ -1,6 +1,7 @@
-import { chmodSync, copyFileSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, unlinkSync } from 'node:fs';
+import { chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, unlinkSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { ConfigError, loadRegistry } from './config.ts';
+import { loadProviderEnvironment } from './environment.ts';
 import { buildLaunchConfig } from './launcher.ts';
 import { readSettings } from './settings.ts';
 import { SERVICE, checked, context, findExecutable, regularContent, shellQuote, systemdQuote, writeManaged } from './platform.ts';
@@ -23,10 +24,10 @@ export function bashrcContent(existing: string, root: string): string {
 export function commandWrapper(action: 'launch' | 'router', ctx: Context): string {
   return `#!/usr/bin/env bash\nexec ${shellQuote(ctx.node)} ${shellQuote(join(ctx.root, 'dist/cli.js'))} ${action} "$@"\n`;
 }
-export function serviceUnit(envFile: string, ctx: Context): string {
+export function serviceUnit(envSource: string, ctx: Context): string {
   const bash = findExecutable('bash');
   if (!bash) throw new ConfigError('bash executable not found');
-  return `[Unit]\nDescription=Local LLM router for claude-sub\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=exec\nWorkingDirectory=${ctx.root.replaceAll('%', '%%')}\nExecStart=${systemdQuote(bash, true)} ${systemdQuote(join(ctx.root, 'scripts/run-router.sh'), true)} ${systemdQuote(envFile, true)} ${systemdQuote(ctx.node, true)}\nRestart=on-failure\nRestartSec=2\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
+  return `[Unit]\nDescription=Local LLM router for claude-sub\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n[Service]\nType=exec\nWorkingDirectory=${ctx.root.replaceAll('%', '%%')}\nExecStart=${systemdQuote(bash, true)} ${systemdQuote(join(ctx.root, 'scripts/run-router.sh'), true)} ${systemdQuote(envSource, true)} ${systemdQuote(ctx.node, true)}\nRestart=on-failure\nRestartSec=2\nUMask=0077\n\n[Install]\nWantedBy=default.target\n`;
 }
 function legacyWrapper(action: 'launch' | 'router', ctx: Context): string {
   const quote = ctx.root.includes("'") && !ctx.root.includes('"') ? '"' : "'";
@@ -61,15 +62,18 @@ export async function install(options: Partial<Context> & { envFile?: string } =
   const previous = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
   const updated = bashrcContent(previous, ctx.root);
   const mode = existsSync(bashrc) ? lstatSync(existsSync(bashrc) && lstatSync(bashrc).isSymbolicLink() ? realpathSync(bashrc) : bashrc).mode & 0o777 : 0o644;
-  let envFile = options.envFile ? resolve(options.envFile) : join(ctx.root, '.env');
-  if (!options.envFile && !existsSync(envFile)) {
-    const legacy = join(ctx.root, 'envs/CHINA_provider.env');
-    if (existsSync(legacy)) envFile = legacy;
-    else { copyFileSync(join(ctx.root, '.env.example'), envFile); chmodSync(envFile, 0o600); }
+  const envFile = options.envFile ? resolve(options.envFile) : undefined;
+  const { files } = loadProviderEnvironment(registry, { root: ctx.root, envFile });
+  if (!envFile && !files.length) {
+    const directory = join(ctx.root, 'envs');
+    mkdirSync(directory, { recursive: true });
+    const target = join(directory, 'keys.env');
+    copyFileSync(join(directory, '.env.example'), target, constants.COPYFILE_EXCL);
+    chmodSync(target, 0o600);
   }
   writeManaged(join(ctx.home, '.local/bin/claude-sub'), commandWrapper('launch', ctx), 0o755);
   writeManaged(join(ctx.home, '.local/bin/claude-sub-router'), commandWrapper('router', ctx), 0o755);
-  writeManaged(join(ctx.home, '.config/systemd/user', SERVICE), serviceUnit(envFile, ctx), 0o600);
+  writeManaged(join(ctx.home, '.config/systemd/user', SERVICE), serviceUnit(envFile ?? '--auto', ctx), 0o600);
   writeManaged(bashrc, updated, mode, true);
   await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
   await checked('systemctl', ['--user', 'enable', SERVICE], ctx.run);
