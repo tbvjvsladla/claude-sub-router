@@ -1,0 +1,15 @@
+provider:
+  id: anthropic
+  name: Anthropic
+  protocol: anthropic
+  base_url: https://api.anthropic.com
+  auth: claude_subscription
+
+models:
+  - id: claude-sonnet-5-5
+    upstream_model: claude-sonnet-5-5
+    display_name: Sonnet 5.5 (Subscription)
+    description: Claude Max subscription
+    default: true
+    reasoning:
+      mode: observe

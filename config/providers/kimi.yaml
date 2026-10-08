@@ -1,0 +1,32 @@
+
+provider:
+  id: kimi
+  name: Kimi
+  protocol: anthropic
+
+  # Kimi 공식 Anthropic 호환 API 주소로 변경
+  base_url: https://api.kimi.com/coding/
+  api_key_env: MOONSHOT_API_KEY
+
+models:
+  - id: kimi-k3
+    upstream_model: k3
+    display_name: Kimi K3
+    description: Kimi Coding · 1M Context
+
+    context:
+      window: 1048576           # 1M (Allegretto/Pro 이상)
+      auto_compact_threshold: 800000
+
+    reasoning:
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        low: low
+        medium: high
+        high: high
+        xhigh: max
+        max: max
+      unsupported_level: error

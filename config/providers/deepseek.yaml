@@ -1,0 +1,40 @@
+provider:
+  id: deepseek
+  name: DeepSeek
+  protocol: anthropic
+  base_url: https://api.deepseek.com/anthropic
+  api_key_env: DEEPSEEK_API_KEY
+
+models:
+  - id: deepseek-pro
+    upstream_model: deepseek-v4-pro
+    display_name: DeepSeek Pro
+    description: DeepSeek API · V4 Pro
+
+    context:
+      window: 1000000
+      auto_compact_threshold: 800000
+
+    reasoning: &deepseek_reasoning
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        low: low
+        medium: high
+        high: high
+        xhigh: high
+        max: max
+      unsupported_level: error
+
+  - id: deepseek-flash
+    upstream_model: deepseek-flash
+    display_name: DeepSeek Flash
+    description: DeepSeek API · Flash
+
+    context:
+      window: 1000000
+      auto_compact_threshold: 800000
+
+    reasoning: *deepseek_reasoning
