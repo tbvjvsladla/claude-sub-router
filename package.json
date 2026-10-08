@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Loopback-only multi-provider router and isolated Claude Code launcher",
+  "description": "Loopback-only multi-provider router sharing the native Claude Code profile",
   "license": "UNLICENSED",
   "engines": {
     "node": ">=22.18.0"

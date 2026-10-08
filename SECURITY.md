@@ -27,6 +27,11 @@ Tests still consume real subscription/API quotas when explicitly invoked.
 
 Install and uninstall leave the original `claude` binary and `~/.claude` profile
 untouched. They also retain `~/.claude-sub`, provider key files, and backups.
+At runtime, `claude-sub` shares native Claude's profile, including login, plugins,
+hooks, permissions and session history. An inherited `CLAUDE_CONFIG_DIR` is
+respected. Routing overrides apply only to the launched process; the launcher
+does not write them to user settings. Changes saved from Claude's own settings
+menus affect the shared profile and therefore both commands.
 Both systemd and direct execution parse `envs/*.env` with Node's dotenv parser;
 they never source these files as shell scripts or expand commands/variables.
 Only keys named by registered providers' `api_key_env` fields are imported.

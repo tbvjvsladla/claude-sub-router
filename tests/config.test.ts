@@ -109,14 +109,15 @@ test('reasoning maps every configured effort without mutating other fields', () 
   }
 });
 
-test('settings and launcher preserve unrelated values and isolate native login', () => {
+test('settings and launcher preserve the native profile and apply routing only to the child', () => {
   const registry = loadRegistry();
   const existing = { unrelated: true, model: 'kimi-k3', modelSettings: { 'kimi-k3': { unrelated: 'keep' } } };
   const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
   const original = structuredClone({ existing, inherited });
-  const { environment, settings } = buildLaunchConfig(registry, existing, inherited, '/fake-home');
+  const { environment, settings } = buildLaunchConfig(registry, existing, inherited);
   assert.equal(settings.model, 'claude-sonnet-5-5');
-  assert.equal(environment.CLAUDE_CONFIG_DIR, '/fake-home/.claude-sub');
+  assert.equal(Object.hasOwn(environment, 'CLAUDE_CONFIG_DIR'), false);
+  assert.equal(environment.ANTHROPIC_BASE_URL, 'http://127.0.0.1:18765');
   assert.equal(environment.ANTHROPIC_DEFAULT_MODEL, settings.model);
   assert.equal(environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '900000');
   for (const name of Object.keys(inherited).filter(name => name !== 'PATH')) assert.equal(environment[name], undefined);
@@ -130,6 +131,16 @@ test('settings and launcher preserve unrelated values and isolate native login',
   assert.equal(modelSettings['claude-sonnet-5-5'], undefined);
   assert.throws(() => buildLaunchConfig(registry, { env: {} }, {}), /must not contain/);
   assert.throws(() => buildSettings({ modelPicker: [] }, registry), /must be objects/);
+});
+
+test('launcher follows an explicitly selected native profile without copying user settings', () => {
+  const registry = loadRegistry();
+  const inherited = { CLAUDE_CONFIG_DIR: '/custom/claude-profile', CLAUDE_CODE_PROJECT_DIR_NAME: 'shared-project' };
+  const { environment, settings } = buildLaunchConfig(registry, {}, inherited);
+  assert.equal(environment.CLAUDE_CONFIG_DIR, inherited.CLAUDE_CONFIG_DIR);
+  assert.equal(environment.CLAUDE_CODE_PROJECT_DIR_NAME, inherited.CLAUDE_CODE_PROJECT_DIR_NAME);
+  for (const key of ['enabledPlugins', 'statusLine', 'hooks', 'permissions']) assert.equal(Object.hasOwn(settings, key), false);
+  assert.deepEqual(inherited, { CLAUDE_CONFIG_DIR: '/custom/claude-profile', CLAUDE_CODE_PROJECT_DIR_NAME: 'shared-project' });
 });
 
 test('M3 strips unsupported effort without mutating thinking, tools, history or structured output', () => {

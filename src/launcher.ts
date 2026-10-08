@@ -7,7 +7,7 @@ import { BASE_URL, findExecutable } from './platform.ts';
 import { buildSettings, readSettings } from './settings.ts';
 import { startRouter } from './service.ts';
 
-export function buildLaunchConfig(registry: Registry, existing: JsonObject, inherited: NodeJS.ProcessEnv, home = homedir()) {
+export function buildLaunchConfig(registry: Registry, existing: JsonObject, inherited: NodeJS.ProcessEnv) {
   const defaultModel = getDefaultModel(registry);
   if (!defaultModel) throw new ConfigError('Exactly one model must have default: true');
   const settings = buildSettings(existing, registry);
@@ -24,7 +24,8 @@ export function buildLaunchConfig(registry: Registry, existing: JsonObject, inhe
     if (provider.api_key_env) delete environment[provider.api_key_env];
     if ((provider.auth ?? 'api_key') === 'api_key' && model.context) windows.push(model.context.window);
   }
-  environment.CLAUDE_CONFIG_DIR = join(home, '.claude-sub');
+  // Keep Claude's native profile resolution, including an explicitly inherited
+  // CLAUDE_CONFIG_DIR. Changing it also separates plugins, login and transcripts.
   environment.ANTHROPIC_BASE_URL = BASE_URL;
   environment.ANTHROPIC_DEFAULT_MODEL = defaultModel;
   if (windows.length) environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(Math.min(...windows));
@@ -36,7 +37,7 @@ export function launchPreview(registry = loadRegistry(), existing = readSettings
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
   return {
-    claude_binary: binary, config_dir: environment.CLAUDE_CONFIG_DIR, base_url: BASE_URL,
+    claude_binary: binary, config_dir: environment.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), base_url: BASE_URL,
     default_model: settings.model, default_option: environment.ANTHROPIC_DEFAULT_MODEL,
     custom_context_window: environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
     available_models: settings.availableModels, router_auth: 'none', runtime: 'typescript',

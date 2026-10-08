@@ -57,7 +57,7 @@ export async function install(options: Partial<Context> & { envFile?: string } =
   if (!ctx.claude) throw new ConfigError('Install Claude Code and add claude to PATH first');
   await checked('systemctl', ['--user', 'list-units', '--no-legend', '--no-pager'], ctx.run);
   const registry = loadRegistry(join(ctx.root, 'config/providers'));
-  buildLaunchConfig(registry, readSettings(ctx.root), process.env, ctx.home);
+  buildLaunchConfig(registry, readSettings(ctx.root), process.env);
   const bashrc = join(ctx.home, '.bashrc');
   const previous = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
   const updated = bashrcContent(previous, ctx.root);
@@ -78,7 +78,7 @@ export async function install(options: Partial<Context> & { envFile?: string } =
   await checked('systemctl', ['--user', 'daemon-reload'], ctx.run);
   await checked('systemctl', ['--user', 'enable', SERVICE], ctx.run);
   await checked(ctx.node, [join(ctx.root, 'dist/cli.js'), 'router', 'restart'], ctx.run);
-  console.log('Installation complete. Run: source ~/.bashrc\nThen: claude-sub\nNative claude and both login profiles were preserved.');
+  console.log('Installation complete. Run: source ~/.bashrc\nThen: claude-sub\nClaude login, plugins and sessions use the same profile as native claude.');
 }
 
 export async function uninstall(options: Partial<Context> & { dryRun?: boolean } = {}): Promise<void> {

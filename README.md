@@ -1,6 +1,6 @@
 # claude-sub
 
-기존 `claude` 명령과 구독 로그인을 유지하면서 별도 `claude-sub` 환경에서
+기존 `claude` 명령의 로그인·플러그인·대화 기록을 공유하면서 `claude-sub`에서
 구독 Sonnet·DeepSeek·Kimi·MiniMax M3·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
@@ -118,9 +118,27 @@ Provider 키는 서버에서만 읽으며 `.bashrc`에 전역 export하지 않�
 잘못된 키는 Provider의 인증 오류를 그대로 반환하고 다른 모델로 대체하지 않습니다.
 수동 실행과 systemd 실행 모두 Node의 dotenv 파서를 사용하며 키 파일을 셸로 실행하지 않습니다.
 
-구독 Sonnet은 **`~/.claude-sub`**의 Claude Code 로그인을 사용합니다.
-필요하면 `claude-sub`에서 로그인하세요. 기존 `claude`, `~/.claude`의 로그인·설정은
-수정하거나 복사하지 않습니다. 셸에 직접 설정한 Anthropic 환경변수는 별도 영향을 줄 수 있습니다.
+`claude-sub`는 원본 `claude`와 같은 프로필(기본 **`~/.claude`**)을 사용합니다.
+구독 로그인, 설치된 플러그인·스킬·MCP, hooks, 대시보드(`statusLine`), 대화 기록을
+그대로 읽으므로 같은 세션을 두 명령에서 이어갈 수 있습니다.
+
+```bash
+claude-sub --resume SESSION_ID
+claude --resume SESSION_ID
+```
+
+런처는 `CLAUDE_CONFIG_DIR`을 강제로 지정하지 않습니다. 셸에서 이 변수를
+명시했다면 두 명령 모두 그 프로필을 사용합니다. 라우터 주소와 모델 설정은
+자식 프로세스의 환경변수와 `--settings`로 해당 실행에만 적용하며 사용자 설정 파일에
+저장하지 않습니다.
+공유 프로필에서 `/config`나 `/model`로 저장한 사용자 설정은 두 명령에 공통 적용됩니다.
+
+이전 버전의 `~/.claude-sub`는 삭제하거나 심볼릭 링크로 교체하지 않습니다.
+그 안의 기존 대화를 별도로 열려면 `CLAUDE_CONFIG_DIR="$HOME/.claude-sub" claude --resume <ID>`를
+사용할 수 있습니다. 프로필 폴더 전체를 덮어쓰지 마세요.
+설정 경로와 실행별 덮어쓰기 동작은
+[공식 환경변수 문서](https://code.claude.com/docs/en/env-vars)와
+[공식 설정 문서](https://code.claude.com/docs/en/settings#change-a-setting-for-one-session)를 따릅니다.
 
 ## 모델 설정
 
