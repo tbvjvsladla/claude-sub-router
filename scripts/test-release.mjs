@@ -26,6 +26,7 @@ try {
     if (/(^|\/)\.env(?:\.|$)|\.env$/.test(path)) assert.equal(path, 'envs/.env.example');
   }
   assert.ok(files.includes(`${name}/envs/.env.example`));
+  assert.ok(files.includes(`${name}/config/subagents.yaml`));
   execFileSync('tar', ['-xzf', archive, '-C', temporary]);
   const project = join(temporary, name);
   execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: project, stdio: 'pipe', timeout: 120000 });

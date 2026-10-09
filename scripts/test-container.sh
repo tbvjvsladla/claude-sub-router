@@ -11,6 +11,10 @@ export PATH="$HOME/.local/bin:$PATH"
 mkdir -p "$HOME/.local/bin" "$HOME/.claude"
 cat > "$HOME/.local/bin/claude" <<'CLAUDE'
 #!/usr/bin/env bash
+if [[ "${1:-}" == '--version' ]]; then
+    printf '%s\n' '2.1.294 (Claude Code)'
+    exit 0
+fi
 node -e 'const assert = require("node:assert/strict"); assert.equal(process.env.CLAUDE_CONFIG_DIR, undefined); assert.equal(process.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:18765"); console.log("FAKE_CLAUDE_SHARED_PROFILE_OK");'
 CLAUDE
 chmod 700 "$HOME/.local/bin/claude"
@@ -23,6 +27,9 @@ source ./env.bash
 claude-sub-router status
 node -e 'const assert = require("node:assert/strict"); const fs = require("node:fs"); const info = JSON.parse(fs.readFileSync(process.env.HOME + "/.local/state/claude-sub-router/installation.json")); assert.equal(info.backend, "standalone"); assert.equal(fs.existsSync(process.env.HOME + "/.config/systemd/user/claude-sub-router.service"), false);'
 claude-sub --check
+printf '%s\n' 'model: gpt-6.1-sol' 'force: true' > /tmp/subagents.yaml
+CLAUDE_SUB_SUBAGENT_CONFIG=/tmp/subagents.yaml claude-sub --check | node -e 'let input=""; process.stdin.on("data", chunk => input += chunk); process.stdin.on("end", () => { const assert = require("node:assert/strict"); const config = JSON.parse(input); assert.equal(config.default_model, "claude-sonnet-5-5"); assert.equal(config.subagent_model, "gpt-6.1-sol"); assert.equal(config.subagent_force, true); });'
+CLAUDE_SUB_SUBAGENT_CONFIG=/tmp/subagents.yaml claude-sub -p FAKE_SUBAGENT_TEST
 claude-sub --resume 00000000-0000-4000-8000-000000000000
 claude-sub-router restart
 claude-sub-router logs

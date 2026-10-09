@@ -1,0 +1,21 @@
+# claude-sub 전용 서브에이전트 모델 설정. 메인/default 모델은 변경하지 않습니다.
+# model: inherit이면 이 파일의 모델 덮어쓰기를 끄고 Claude의 선택 규칙을 사용합니다.
+# 선택하려면 아래 등록 ID 중 하나를 model에 입력하세요. API 키는 envs/*.env에 둡니다.
+#
+# 현재 등록된 서드파티 모델:
+#   deepseek-pro    (DEEPSEEK_API_KEY)
+#   deepseek-flash  (DEEPSEEK_API_KEY)
+#   kimi-k3         (MOONSHOT_API_KEY)
+#   minimax-m3      (MINIMAX_API_KEY)
+#   gpt-6.1-sol     (OPENROUTER_API_KEY)
+#   gpt-6-luna      (OPENROUTER_API_KEY)
+# 등록된 Anthropic 모델 claude-sonnet-5-5도 사용할 수 있습니다.
+#
+# force: true는 에이전트 정의의 model도 덮어씁니다 (Claude Code >= 2.1.257).
+# force: false는 기본값만 설정하므로 정의/호출에서 지정한 model이 우선합니다.
+# inherit일 때 force는 무시합니다. fork와 model: inherit인 서브에이전트 스킬은
+# 강제 설정에도 메인 모델을 유지하는 Claude Code의 예외입니다.
+# 변경 후 claude-sub를 새로 시작하세요. 라우터 서버 재시작은 필요하지 않습니다.
+# 공식 문서: https://code.claude.com/docs/en/sub-agents#run-every-subagent-on-one-model
+model: inherit
+force: true

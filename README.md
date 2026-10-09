@@ -166,6 +166,55 @@ claude --resume SESSION_ID
 [공식 환경변수 문서](https://code.claude.com/docs/en/env-vars)와
 [공식 설정 문서](https://code.claude.com/docs/en/settings#change-a-setting-for-one-session)를 따릅니다.
 
+### 서브에이전트 모델 지정
+
+메인/default 모델과 서브에이전트 모델은 별도로 지정할 수 있습니다.
+`config/subagents.yaml`에서 원하는 **등록 모델 ID**와 강제 적용 여부를 설정하세요.
+파일 주석에 현재 서드파티 모델 6종과 필요한 키 이름이 있습니다.
+
+```yaml
+model: gpt-6.1-sol
+force: true
+```
+
+이 예제는 메인을 기존 `claude-sonnet-5-5`로 유지하면서 서브에이전트를 GPT로 보냅니다.
+파일 수정 후 **새 `claude-sub` 실행부터** 적용되며 라우터 재시작은 필요하지 않습니다.
+`claude-sub --check`의 `default_model`, `subagent_model`, `subagent_force`로 확인하세요.
+기본 파일은 `model: inherit`로 기존 에이전트 선택 규칙을 유지합니다.
+`inherit`일 때 `force`는 무시하며 두 서브에이전트 환경변수를 지정하지 않습니다.
+파일이 없는 이전 설치도 같은 방식으로 동작합니다.
+
+| 목적 | Claude Code 공식 설정 | 이 프로젝트의 설정 위치 |
+| --- | --- | --- |
+| 새 세션 기본 모델 | `ANTHROPIC_DEFAULT_MODEL` | `config/providers/*.yaml`의 `default: true` |
+| 현재 메인 모델 | `--model`, `/model`, `ANTHROPIC_MODEL`, `model` | 기본값은 위 YAML, 실행별 변경은 `--model` |
+| 서브에이전트 기본 모델 | `CLAUDE_CODE_SUBAGENT_MODEL` | `config/subagents.yaml`의 `model` |
+| 서브 모델 강제 적용 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` | 같은 파일의 `force: true` |
+| 개별 에이전트 모델 | `.claude/agents/*.md`, `~/.claude/agents/*.md`의 `model`, `--agents` | 기존 에이전트 정의 |
+| 모델 별칭 해석 | `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` 등 | 이번 변경에서 지정하지 않음 |
+
+`force: false`에서는 **호출 시 model → 에이전트 정의 model → 서브 기본 모델 → 메인 모델**
+순서가 적용됩니다. 정의의 `model: inherit`도 서브 기본값보다 우선하므로,
+Explore/Plan 같은 내장 에이전트까지 변경하려면 `force: true`를 사용하세요.
+강제 적용에는 Claude Code **2.1.257 이상**이 필요하며 실행 전에 버전을 검사합니다.
+강제 적용 중에도 **fork와 `model: inherit`인 서브에이전트 스킬은 메인 모델을 유지**합니다.
+관리자 `availableModels` 제한으로 Claude가 다른 모델을 선택할 수도 있으므로
+실행 중 `/tasks`의 실제 모델을 확인하세요.
+[공식 서브에이전트 모델 우선순위와 강제 적용](https://code.claude.com/docs/en/sub-agents#choose-a-model),
+[공식 모델 설정](https://code.claude.com/docs/en/model-config#environment-variables).
+
+YAML은 `claude-sub` 자식 프로세스의 서브에이전트 환경변수를 구성하며 같은 이름의
+상속된 셸 변수를 대체합니다. 원본 `claude`의 설정 파일이나 전역 셸은 수정하지 않습니다.
+별도 파일을 실행 한 번에만 선택하려면 다음처럼 사용합니다.
+
+```bash
+CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub --check
+CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub
+```
+
+잘못된 YAML, 등록되지 않은 모델 ID, 누락된 명시적 파일 경로는 실행 전에 거부합니다.
+키 누락이나 Provider 오류를 다른 모델로 자동 대체하지 않습니다.
+
 ## 모델 설정
 
 `config/providers/*.yaml`이 모델 목록·기본 모델·인증·reasoning 매핑의 원본입니다.
@@ -278,6 +327,24 @@ node scripts/test-cli.mjs deepseek-flash
 기본 실행은 원본 Sonnet 및 라우터의 모든 모델을 검사하며, 모델 인수는 해당
 `claude-sub` 모델만 검사합니다. 응답 본문·키를 제외한 요약만
 `artifacts/cli-e2e.json`에 저장합니다. 이 디렉터리는 배포하지 않습니다.
+
+실제 **서브에이전트 호출** 검증도 API 비용을 사용하며 CI에서는 자동 실행하지 않습니다.
+
+```bash
+npm run test:subagents
+npm run test:subagents -- kimi-k3 minimax-m3
+SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
+```
+
+테스트 메인은 기본 `deepseek-flash`이며 프로젝트의 Sonnet 기본값은 변경하지 않습니다.
+각 실행에 임시 YAML을 지정하여 기본 실행은 서드파티 6종을 모두 검사합니다.
+충돌하는 `model: sonnet` 에이전트 정의를 강제로 덮어쓰고, 하위 Agent가 임시 파일의
+무작위 문자열을 **Read 도구로 읽고 반환**했는지 검사합니다. 부모의 파일 읽기는 실패로
+처리합니다. 스트림의 `parent_tool_use_id`, 하위 응답의 실제 모델, 라우터의 Provider
+요청·HTTP 200도 확인하므로 부모의 성공 주장만으로는 통과하지 않습니다.
+인수 없이 실행하면 기본값/정의 우선순위와 내장 Explore 강제 적용도 추가 검증합니다.
+결과는 `artifacts/subagents-e2e.json`에 저장합니다. Claude가 출력한 비용은 추정치이며
+특히 `costBasis: unknown`인 커스텀 모델에서는 Provider의 실제 청구액과 다를 수 있습니다.
 
 ```bash
 npm run benchmark
