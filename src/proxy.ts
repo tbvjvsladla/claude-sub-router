@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isObject } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
+import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from './subagents.ts';
 
 export class RouterError extends Error {
   status: number;
@@ -125,7 +126,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
+      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
       return;
     }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
@@ -136,16 +137,21 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     if (request.method !== 'POST' || !['/v1/messages', '/v1/messages/count_tokens'].includes(url.pathname)) throw new RouterError(404, 'Not Found');
     const body = await readBody(request, options.bodyLimit ?? 32 * 1024 * 1024);
     if (typeof body.model !== 'string') throw new RouterError(400, 'model must be a string');
-    const entry = registry.get(body.model);
-    if (!entry) throw new RouterError(400, 'Unknown model');
-    const counting = url.pathname.endsWith('/count_tokens');
-    const payload = counting && entry.model.reasoning?.mode !== 'omit' ? { ...body } : applyReasoning(body, entry.model);
     const incoming = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
       if (value !== undefined) incoming.set(name, Array.isArray(value) ? value.join(',') : value);
     }
+    const compactionModel = incoming.get(COMPACTION_MODEL_HEADER);
+    if (compactionModel !== null && !registry.has(compactionModel)) throw new RouterError(400, 'Unknown compaction policy model');
+    const requestClass = incoming.get('x-claude-code-request-class');
+    // Never infer a feature from prompt text, agent IDs or the main model.
+    const model = requestClass === 'compaction' && compactionModel !== null ? compactionModel : body.model;
+    const entry = registry.get(model);
+    if (!entry) throw new RouterError(400, 'Unknown model');
+    const counting = url.pathname.endsWith('/count_tokens');
+    const payload = counting && entry.model.reasoning?.mode !== 'omit' ? { ...body } : applyReasoning(body, entry.model);
     const headers = upstreamHeaders(incoming, entry.provider, environment);
-    log('REQUEST', { provider: entry.provider.id, model: body.model, upstream_model: entry.model.upstream_model, mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
+    log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
     payload.model = entry.model.upstream_model;
     const controller = new AbortController();
     const aborted = () => controller.abort();

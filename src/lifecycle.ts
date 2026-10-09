@@ -4,7 +4,7 @@ import { ConfigError, loadRegistry } from './config.ts';
 import { loadProviderEnvironment } from './environment.ts';
 import { chooseBackend, inContainer, installationPath, readInstallation } from './installation.ts';
 import { buildLaunchConfig } from './launcher.ts';
-import { loadSubagentConfig } from './subagents.ts';
+import { loadModelPolicy } from './subagents.ts';
 import { stopRouter } from './service.ts';
 import { standaloneProcess } from './standalone.ts';
 import { readSettings } from './settings.ts';
@@ -65,7 +65,7 @@ export async function install(options: Partial<Context> & { envFile?: string; se
   const tracked = previousInstallation?.backend === 'standalone' && standaloneProcess(ctx);
   if ((previousInstallation && previousInstallation.backend !== backend && (registered || tracked)) || (backend === 'standalone' && existsSync(unit))) throw new ConfigError('Uninstall the existing service before switching service backends');
   const registry = loadRegistry(join(ctx.root, 'config/providers'));
-  buildLaunchConfig(registry, readSettings(ctx.root), process.env, loadSubagentConfig(registry, { root: ctx.root }));
+  buildLaunchConfig(registry, readSettings(ctx.root), process.env, loadModelPolicy(registry, { root: ctx.root }));
   const bashrc = join(ctx.home, '.bashrc');
   const previous = existsSync(bashrc) ? readFileSync(bashrc, 'utf8') : '';
   const updated = bashrcContent(previous, ctx.root);

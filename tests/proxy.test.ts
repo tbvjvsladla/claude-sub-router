@@ -7,6 +7,10 @@ import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import { loadRegistry } from '../src/config.ts';
 import { createRouterServer } from '../src/proxy.ts';
+import { COMPACTION_MODEL_HEADER } from '../src/subagents.ts';
+import type { JsonObject } from '../src/config.ts';
+import { assertRouterPolicy } from '../src/launcher.ts';
+import { defaultModelPolicy } from '../src/subagents.ts';
 
 async function listen(server: Server): Promise<string> {
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -15,6 +19,71 @@ async function listen(server: Server): Promise<string> {
 async function close(server: Server): Promise<void> {
   await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 }
+
+test('compaction policy is isolated per client and official request class; other requests keep their model', async () => {
+  const registry = loadRegistry();
+  const calls: { body: JsonObject; headers: Headers; url: string }[] = [];
+  const events: { event: string; metadata: JsonObject }[] = [];
+  let upstreamStatus = 200;
+  const proxy = createRouterServer(registry, {
+    environment: { MOONSHOT_API_KEY: 'FAKE_KIMI', DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK', OPENROUTER_API_KEY: 'FAKE_OPENROUTER' },
+    fetch: async (input, init) => {
+      calls.push({ body: JSON.parse(String(init?.body)), headers: new Headers(init?.headers), url: String(input) });
+      return new Response(JSON.stringify({ result: upstreamStatus === 200 ? 'ok' : 'provider error' }), { status: upstreamStatus });
+    },
+    log: (event, metadata) => events.push({ event, metadata }),
+  });
+  const base = await listen(proxy);
+  const history = [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE_THINKING', signature: 'FAKE_SIGNATURE' }] }, { role: 'user', content: 'Please compact this conversation' }];
+  const body = { model: 'kimi-k3', messages: history, system: [{ type: 'text', text: 'FAKE_SYSTEM' }], tools: [{ name: 'Artifact', input_schema: { type: 'object', properties: { value: { type: 'string', pattern: '^[^\\0]*$' } } } }], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
+  const original = structuredClone(body);
+  async function send(headers: Record<string, string>, path = '/v1/messages', requestedBody = body) {
+    const response = await fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(requestedBody) });
+    await response.text(); return response;
+  }
+  try {
+    const policy = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
+    await assertRouterPolicy(policy, (_input, init) => fetch(`${base}/health`, init));
+    await assertRouterPolicy(defaultModelPolicy(), async () => { throw new Error('inherit must not require router features'); });
+    await assert.rejects(() => assertRouterPolicy(policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
+    for (const requestClass of [undefined, 'main', 'subagent', 'workflow', 'auxiliary', 'future-class']) {
+      const headers: Record<string, string> = { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-compaction': 'manual' };
+      if (requestClass) headers['x-claude-code-request-class'] = requestClass;
+      assert.equal((await send(headers)).status, 200);
+      assert.equal(calls.at(-1)!.body.model, 'k3');
+      assert.equal(calls.at(-1)!.headers.get(COMPACTION_MODEL_HEADER), null);
+    }
+    assert.equal((await send({ 'x-claude-code-request-class': 'compaction' })).status, 200);
+    assert.equal(calls.at(-1)!.body.model, 'k3');
+    for (const trigger of ['manual', 'auto', 'reactive']) {
+      assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-request-class': 'compaction', 'x-claude-code-compaction': trigger, authorization: 'Bearer FAKE_OAUTH' })).status, 200);
+      const call = calls.at(-1)!;
+      assert.equal(call.body.model, 'deepseek-flash');
+      assert.deepEqual({ ...call.body, model: 'kimi-k3' }, original);
+      assert.equal(call.headers.get('authorization'), null);
+      assert.equal(call.headers.get('x-api-key'), 'FAKE_DEEPSEEK');
+      assert.equal(call.headers.get(COMPACTION_MODEL_HEADER), null);
+      assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.model, 'deepseek-flash');
+      assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.requested_model, 'kimi-k3');
+    }
+    const before = calls.length;
+    await Promise.all(['deepseek-flash', 'gpt-6-luna'].map(model => send({ [COMPACTION_MODEL_HEADER]: model, 'x-claude-code-request-class': 'compaction' })));
+    assert.deepEqual(new Set(calls.slice(before).map(call => call.body.model)), new Set(['deepseek-flash', 'openai/gpt-6-luna']));
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages/count_tokens')).status, 200);
+    assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
+    // Native aliases need not be registered when an explicit compaction policy selects a registered target.
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages', { ...body, model: 'unregistered-native-id' })).status, 200);
+    assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
+    const count = calls.length;
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'missing', 'x-claude-code-request-class': 'compaction' })).status, 400);
+    assert.equal(calls.length, count);
+    upstreamStatus = 400;
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' })).status, 400);
+    assert.equal(calls.length, count + 1);
+    assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
+    assert.deepEqual(body, original);
+  } finally { await close(proxy); }
+});
 
 test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider errors for every model', async () => {
   const registry = loadRegistry();

@@ -1,15 +1,15 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigError, getDefaultModel, loadRegistry } from './config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
 import { BASE_URL, findExecutable, run } from './platform.ts';
 import { buildSettings, readSettings } from './settings.ts';
 import { startRouter } from './service.ts';
-import { applySubagentConfig, assertSubagentVersion, loadSubagentConfig } from './subagents.ts';
-import type { SubagentConfig } from './subagents.ts';
+import { applyModelPolicy, assertModelPolicyVersion, COMPACTION_POLICY_FEATURE, defaultModelPolicy, loadModelPolicy } from './subagents.ts';
+import type { ModelPolicy } from './subagents.ts';
 
-export function buildLaunchConfig(registry: Registry, existing: JsonObject, inherited: NodeJS.ProcessEnv, subagents: SubagentConfig = { model: 'inherit', force: false }) {
+export function buildLaunchConfig(registry: Registry, existing: JsonObject, inherited: NodeJS.ProcessEnv, policy: ModelPolicy = defaultModelPolicy()) {
   const defaultModel = getDefaultModel(registry);
   if (!defaultModel) throw new ConfigError('Exactly one model must have default: true');
   const settings = buildSettings(existing, registry);
@@ -31,12 +31,12 @@ export function buildLaunchConfig(registry: Registry, existing: JsonObject, inhe
   environment.ANTHROPIC_BASE_URL = BASE_URL;
   environment.ANTHROPIC_DEFAULT_MODEL = defaultModel;
   if (windows.length) environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(Math.min(...windows));
-  applySubagentConfig(environment, subagents);
+  applyModelPolicy(environment, policy);
   return { environment, settings };
 }
 
-export function launchPreview(registry = loadRegistry(), existing = readSettings(), subagents = loadSubagentConfig(registry, { path: process.env.CLAUDE_SUB_SUBAGENT_CONFIG })) {
-  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, subagents);
+export function launchPreview(registry = loadRegistry(), existing = readSettings(), policy = loadModelPolicy(registry, { path: process.env.CLAUDE_SUB_SUBAGENT_CONFIG })) {
+  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, policy);
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
   return {
@@ -45,24 +45,35 @@ export function launchPreview(registry = loadRegistry(), existing = readSettings
     custom_context_window: environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
     subagent_model: environment.CLAUDE_CODE_SUBAGENT_MODEL ?? 'inherit',
     subagent_force: environment.CLAUDE_CODE_SUBAGENT_MODEL_FORCE === '1',
+    model_policy: policy,
     available_models: settings.availableModels, router_auth: 'none', runtime: 'typescript',
   };
+}
+
+export async function assertRouterPolicy(policy: ModelPolicy, fetcher = fetch): Promise<void> {
+  if (policy.compaction.model === 'inherit') return;
+  const response = await fetcher(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
+  const health: unknown = await response.json();
+  if (!response.ok || !isObject(health) || !Array.isArray(health.features) || !health.features.includes(COMPACTION_POLICY_FEATURE)) {
+    throw new ConfigError('Running router does not support compaction model policy; run claude-sub-router restart');
+  }
 }
 
 export async function launch(args: string[]): Promise<number> {
   const registry = loadRegistry();
   const existing = readSettings();
-  const subagents = loadSubagentConfig(registry, { path: process.env.CLAUDE_SUB_SUBAGENT_CONFIG });
-  if (args.length === 1 && args[0] === '--check') { console.log(JSON.stringify(launchPreview(registry, existing, subagents), null, 2)); return 0; }
+  const policy = loadModelPolicy(registry, { path: process.env.CLAUDE_SUB_SUBAGENT_CONFIG });
+  if (args.length === 1 && args[0] === '--check') { console.log(JSON.stringify(launchPreview(registry, existing, policy), null, 2)); return 0; }
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
-  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, subagents);
-  if (subagents.model !== 'inherit' && subagents.force) {
+  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, policy);
+  if ((policy.subagents.model !== 'inherit' && policy.subagents.force) || policy.compaction.model !== 'inherit') {
     const version = await run(binary, ['--version']);
-    if (version.code !== 0) throw new ConfigError('Could not determine Claude Code version for forced subagent models');
-    assertSubagentVersion(version.stdout, subagents);
+    if (version.code !== 0) throw new ConfigError('Could not determine Claude Code version for model policy');
+    assertModelPolicyVersion(version.stdout, policy);
   }
   await startRouter(registry);
+  await assertRouterPolicy(policy);
   return new Promise((resolve, reject) => {
     const child = spawn(binary, ['--settings', JSON.stringify(settings), '--model', String(settings.model), ...args], { env: environment, stdio: 'inherit' });
     const interrupt = () => child.kill('SIGINT');

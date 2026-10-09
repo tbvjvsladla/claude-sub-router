@@ -1,21 +1,24 @@
-# claude-sub 전용 서브에이전트 모델 설정. 메인/default 모델은 변경하지 않습니다.
-# model: inherit이면 이 파일의 모델 덮어쓰기를 끄고 Claude의 선택 규칙을 사용합니다.
-# 선택하려면 아래 등록 ID 중 하나를 model에 입력하세요. API 키는 envs/*.env에 둡니다.
-#
-# 현재 등록된 서드파티 모델:
-#   deepseek-pro    (DEEPSEEK_API_KEY)
-#   deepseek-flash  (DEEPSEEK_API_KEY)
-#   kimi-k3         (MOONSHOT_API_KEY)
-#   minimax-m3      (MINIMAX_API_KEY)
-#   gpt-6.1-sol     (OPENROUTER_API_KEY)
-#   gpt-6-luna      (OPENROUTER_API_KEY)
-# 등록된 Anthropic 모델 claude-sonnet-5-5도 사용할 수 있습니다.
-#
-# force: true는 에이전트 정의의 model도 덮어씁니다 (Claude Code >= 2.1.257).
-# force: false는 기본값만 설정하므로 정의/호출에서 지정한 model이 우선합니다.
-# inherit일 때 force는 무시합니다. fork와 model: inherit인 서브에이전트 스킬은
-# 강제 설정에도 메인 모델을 유지하는 Claude Code의 예외입니다.
-# 변경 후 claude-sub를 새로 시작하세요. 라우터 서버 재시작은 필요하지 않습니다.
-# 공식 문서: https://code.claude.com/docs/en/sub-agents#run-every-subagent-on-one-model
-model: inherit
-force: true
+# 기능별 모델 선택. inherit는 Claude/플러그인의 기존 선택 규칙을 그대로 따릅니다.
+# 각 model을 등록 ID로 바꾸면 해당 기능만 변경됩니다. 메인/default 모델과는 별개입니다.
+# 등록된 서드파티 ID (키는 envs/*.env에 저장):
+#   deepseek-pro, deepseek-flash  (DEEPSEEK_API_KEY)
+#   kimi-k3                     (MOONSHOT_API_KEY)
+#   minimax-m3                  (MINIMAX_API_KEY)
+#   gpt-6.1-sol, gpt-6-luna      (OPENROUTER_API_KEY)
+# Anthropic 등록 ID: claude-sonnet-5-5. 예: model: gpt-6.1-sol
+# 변경 후 새 claude-sub 실행부터 적용됩니다. 오류 시 다른 모델로 자동 대체하지 않습니다.
+
+subagents:
+  model: inherit
+  # false: 정의/호출에서 선택한 모델 우선. true: Explore/Plan 등도 강제 변경 (>=2.1.257).
+  # inherit에서는 force를 적용하지 않습니다. fork/일부 inherit 스킬은 강제 적용의 예외입니다.
+  force: false
+
+compaction:
+  # 자동 압축과 /compact 요약 요청만 변경합니다 (Claude Code >=2.1.273).
+  model: inherit
+
+ouroboros:
+  # Ouroboros의 인터뷰·명확화 모델 (Claude Code backend). 실행 worker/평가 모델은 별도입니다.
+  # 선택 시 명확화 모델을 고정하고, 플러그인 전체의 모델 자동 최신 해석을 끕니다 (PIN_MODELS=1).
+  model: inherit

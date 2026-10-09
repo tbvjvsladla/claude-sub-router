@@ -166,30 +166,43 @@ claude --resume SESSION_ID
 [공식 환경변수 문서](https://code.claude.com/docs/en/env-vars)와
 [공식 설정 문서](https://code.claude.com/docs/en/settings#change-a-setting-for-one-session)를 따릅니다.
 
-### 서브에이전트 모델 지정
+### 기능별 모델 지정
 
-메인/default 모델과 서브에이전트 모델은 별도로 지정할 수 있습니다.
-`config/subagents.yaml`에서 원하는 **등록 모델 ID**와 강제 적용 여부를 설정하세요.
-파일 주석에 현재 서드파티 모델 6종과 필요한 키 이름이 있습니다.
+`config/subagents.yaml`에서 세 기능의 모델을 독립적으로 선택합니다. 기본값은 모두
+`inherit`이며 Claude와 플러그인의 기존 모델 선택 규칙·환경변수를 유지합니다.
+메인 연결의 기본 Sonnet을 다른 기능의 공통 기본값으로 지정하지 않습니다.
+원하는 항목의 `model`만 **등록 모델 ID**로 바꾸세요. 파일 주석에 서드파티 6종과 키 이름이 있습니다.
 
 ```yaml
-model: gpt-6.1-sol
-force: true
+subagents:
+  model: inherit
+  force: false
+compaction:
+  model: inherit
+ouroboros:
+  model: inherit
 ```
 
-이 예제는 메인을 기존 `claude-sonnet-5-5`로 유지하면서 서브에이전트를 GPT로 보냅니다.
-파일 수정 후 **새 `claude-sub` 실행부터** 적용되며 라우터 재시작은 필요하지 않습니다.
-`claude-sub --check`의 `default_model`, `subagent_model`, `subagent_force`로 확인하세요.
-기본 파일은 `model: inherit`로 기존 에이전트 선택 규칙을 유지합니다.
-`inherit`일 때 `force`는 무시하며 두 서브에이전트 환경변수를 지정하지 않습니다.
-파일이 없는 이전 설치도 같은 방식으로 동작합니다.
+| 항목 | 적용 범위 | 모델을 선택했을 때 |
+| --- | --- | --- |
+| `subagents` | 일반 서브에이전트·Explore/Plan | Claude의 서브 모델 환경변수 설정 |
+| `compaction` | 자동 압축·`/compact`의 요약 요청 | 공식 `compaction` 요청 헤더를 보고 해당 요청만 라우팅 |
+| `ouroboros` | Ouroboros의 인터뷰·명확화 기본 모델, Claude Code backend | `OUROBOROS_CLARIFICATION_MODEL`과 `OUROBOROS_PIN_MODELS=1` 설정 |
+
+예를 들어 `subagents.model: gpt-6.1-sol`, `subagents.force: true`로 설정하면 메인 모델과
+압축·Ouroboros 설정을 유지하면서 일반 서브에이전트를 GPT로 보냅니다.
+파일 수정 후 **새 `claude-sub` 실행부터** 적용됩니다. 확장 기능을 처음 설치할 때는
+`npm run build`와 `claude-sub-router restart`가 필요하며, 이후 이 YAML만 변경할 때는
+라우터 재시작이 필요하지 않습니다. `claude-sub --check`의 `model_policy`로 확인하세요.
+파일이 없는 이전 설치와 기존 최상위 `model`/`force` 형식도 지원합니다.
+기존 형식과 새 섹션을 한 파일에서 함께 사용하면 오류로 처리합니다.
 
 | 목적 | Claude Code 공식 설정 | 이 프로젝트의 설정 위치 |
 | --- | --- | --- |
 | 새 세션 기본 모델 | `ANTHROPIC_DEFAULT_MODEL` | `config/providers/*.yaml`의 `default: true` |
 | 현재 메인 모델 | `--model`, `/model`, `ANTHROPIC_MODEL`, `model` | 기본값은 위 YAML, 실행별 변경은 `--model` |
-| 서브에이전트 기본 모델 | `CLAUDE_CODE_SUBAGENT_MODEL` | `config/subagents.yaml`의 `model` |
-| 서브 모델 강제 적용 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` | 같은 파일의 `force: true` |
+| 서브에이전트 기본 모델 | `CLAUDE_CODE_SUBAGENT_MODEL` | `config/subagents.yaml`의 `subagents.model` |
+| 서브 모델 강제 적용 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` | 같은 파일의 `subagents.force: true` |
 | 개별 에이전트 모델 | `.claude/agents/*.md`, `~/.claude/agents/*.md`의 `model`, `--agents` | 기존 에이전트 정의 |
 | 모델 별칭 해석 | `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` 등 | 이번 변경에서 지정하지 않음 |
 
@@ -203,8 +216,20 @@ Explore/Plan 같은 내장 에이전트까지 변경하려면 `force: true`를 �
 [공식 서브에이전트 모델 우선순위와 강제 적용](https://code.claude.com/docs/en/sub-agents#choose-a-model),
 [공식 모델 설정](https://code.claude.com/docs/en/model-config#environment-variables).
 
-YAML은 `claude-sub` 자식 프로세스의 서브에이전트 환경변수를 구성하며 같은 이름의
-상속된 셸 변수를 대체합니다. 원본 `claude`의 설정 파일이나 전역 셸은 수정하지 않습니다.
+압축 모델을 선택하면 Claude Code **2.1.273 이상**을 확인하고
+`CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`을 켭니다. 실행별 선택값은 로컬 라우터에서만
+소비하는 헤더로 전달하므로 다른 세션의 압축 모델에 영향을 주지 않습니다.
+요청 종류 헤더가 없으면 요청의 원래 모델을 유지하며 프롬프트 내용으로 추측하지 않습니다.
+압축 모델을 지정했는데 실행 중인 서버가 이전 버전이면, 모델을 무시하는 대신 재시작을 안내합니다.
+[공식 gateway hint headers](https://code.claude.com/docs/en/llm-gateway-protocol#gateway-hint-headers).
+
+Ouroboros의 실행 worker·평가 모델·개별 역할 설정은 플러그인에서 관리합니다.
+`ouroboros.model`을 선택하면 플러그인 전체의 모델 자동 최신 해석을 끄는 pin 기능도 켭니다.
+개별 역할 모델의 우선순위는 플러그인 규칙을 따릅니다. `inherit`에서는 두 변수를 덮어쓰지 않습니다.
+이 연결은 설치된 Ouroboros 소스와 보고서의 0.55.6 모델 선택 동작을 기준으로 합니다.
+
+YAML의 덮어쓰기는 `claude-sub` 자식 프로세스에만 적용합니다.
+원본 `claude`의 설정 파일이나 전역 셸은 수정하지 않습니다.
 별도 파일을 실행 한 번에만 선택하려면 다음처럼 사용합니다.
 
 ```bash
@@ -214,6 +239,7 @@ CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub
 
 잘못된 YAML, 등록되지 않은 모델 ID, 누락된 명시적 파일 경로는 실행 전에 거부합니다.
 키 누락이나 Provider 오류를 다른 모델로 자동 대체하지 않습니다.
+모델 선택과 해당 모델의 Artifact 도구·압축·플러그인 호환성은 별도 검증 대상입니다.
 
 ## 모델 설정
 
