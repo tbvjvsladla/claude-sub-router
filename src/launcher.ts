@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigError, getDefaultModel, isObject, loadRegistry } from './config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
-import { BASE_URL, findExecutable, run } from './platform.ts';
+import { BASE_URL, context, findExecutable, run } from './platform.ts';
+import type { Context } from './platform.ts';
+import { loadProviderEnvironment } from './environment.ts';
+import { readInstallation } from './installation.ts';
 import { buildSettings, readSettings } from './settings.ts';
 import { startRouter } from './service.ts';
 import { applyModelPolicy, assertModelPolicyVersion, COMPACTION_POLICY_FEATURE, defaultModelPolicy, loadModelPolicy } from './subagents.ts';
@@ -26,6 +29,12 @@ export function buildLaunchConfig(registry: Registry, existing: JsonObject, inhe
     if (provider.api_key_env) delete environment[provider.api_key_env];
     if ((provider.auth ?? 'api_key') === 'api_key' && model.context) windows.push(model.context.window);
   }
+  if ([...registry.values()].some(({ provider }) => provider.auth === 'claude_native')) {
+    // Only the launched Claude process receives the Anthropic key. Claude keeps
+    // its own interactive approval and non-interactive authentication policy.
+    if (inherited.ANTHROPIC_API_KEY?.trim()) environment.ANTHROPIC_API_KEY = inherited.ANTHROPIC_API_KEY;
+    if (inherited.CLAUDE_CODE_OAUTH_TOKEN?.trim()) environment.CLAUDE_CODE_OAUTH_TOKEN = inherited.CLAUDE_CODE_OAUTH_TOKEN;
+  }
   // Keep Claude's native profile resolution, including an explicitly inherited
   // CLAUDE_CONFIG_DIR. Changing it also separates plugins, login and transcripts.
   environment.ANTHROPIC_BASE_URL = BASE_URL;
@@ -35,8 +44,12 @@ export function buildLaunchConfig(registry: Registry, existing: JsonObject, inhe
   return { environment, settings };
 }
 
+export function loadLaunchEnvironment(registry: Registry, ctx: Context = context(), inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return loadProviderEnvironment(registry, { root: ctx.root, envFile: readInstallation(ctx)?.envFile, environment: inherited }).environment;
+}
+
 export function launchPreview(registry = loadRegistry(), existing = readSettings(), policy = loadModelPolicy(registry, { path: process.env.CLAUDE_SUB_SUBAGENT_CONFIG })) {
-  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, policy);
+  const { environment, settings } = buildLaunchConfig(registry, existing, loadLaunchEnvironment(registry), policy);
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
   return {
@@ -46,16 +59,20 @@ export function launchPreview(registry = loadRegistry(), existing = readSettings
     subagent_model: environment.CLAUDE_CODE_SUBAGENT_MODEL ?? 'inherit',
     subagent_force: environment.CLAUDE_CODE_SUBAGENT_MODEL_FORCE === '1',
     model_policy: policy,
+    anthropic_auth: { api_key_configured: !!environment.ANTHROPIC_API_KEY, api_key_source: process.env.ANTHROPIC_API_KEY?.trim() ? 'inherited_environment' : environment.ANTHROPIC_API_KEY ? 'provider_env_file' : 'none', interactive: 'claude_code_policy', print: environment.ANTHROPIC_API_KEY ? 'api_key' : 'claude_code_policy' },
     available_models: settings.availableModels, router_auth: 'none', runtime: 'typescript',
   };
 }
 
-export async function assertRouterPolicy(policy: ModelPolicy, fetcher = fetch): Promise<void> {
-  if (policy.compaction.model === 'inherit') return;
+export async function assertRouterCompatibility(registry: Registry, policy: ModelPolicy, fetcher = fetch): Promise<void> {
+  const required = [];
+  if (policy.compaction.model !== 'inherit') required.push(COMPACTION_POLICY_FEATURE);
+  if ([...registry.values()].some(({ provider }) => provider.auth === 'claude_native')) required.push(NATIVE_AUTH_FEATURE);
+  if (!required.length) return;
   const response = await fetcher(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
   const health: unknown = await response.json();
-  if (!response.ok || !isObject(health) || !Array.isArray(health.features) || !health.features.includes(COMPACTION_POLICY_FEATURE)) {
-    throw new ConfigError('Running router does not support compaction model policy; run claude-sub-router restart');
+  if (!response.ok || !isObject(health) || !Array.isArray(health.features) || required.some(feature => !(health.features as unknown[]).includes(feature))) {
+    throw new ConfigError('Running router does not support the required authentication or model policy; run npm run build and claude-sub-router restart');
   }
 }
 
@@ -66,14 +83,14 @@ export async function launch(args: string[]): Promise<number> {
   if (args.length === 1 && args[0] === '--check') { console.log(JSON.stringify(launchPreview(registry, existing, policy), null, 2)); return 0; }
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
-  const { environment, settings } = buildLaunchConfig(registry, existing, process.env, policy);
+  const { environment, settings } = buildLaunchConfig(registry, existing, loadLaunchEnvironment(registry), policy);
   if ((policy.subagents.model !== 'inherit' && policy.subagents.force) || policy.compaction.model !== 'inherit') {
     const version = await run(binary, ['--version']);
     if (version.code !== 0) throw new ConfigError('Could not determine Claude Code version for model policy');
     assertModelPolicyVersion(version.stdout, policy);
   }
   await startRouter(registry);
-  await assertRouterPolicy(policy);
+  await assertRouterCompatibility(registry, policy);
   return new Promise((resolve, reject) => {
     const child = spawn(binary, ['--settings', JSON.stringify(settings), '--model', String(settings.model), ...args], { env: environment, stdio: 'inherit' });
     const interrupt = () => child.kill('SIGINT');

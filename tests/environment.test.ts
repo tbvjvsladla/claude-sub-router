@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { ROOT, loadRegistry } from '../src/config.ts';
 import { environmentFiles, loadProviderEnvironment } from '../src/environment.ts';
+import { buildLaunchConfig, loadLaunchEnvironment } from '../src/launcher.ts';
+import { context } from '../src/platform.ts';
+import { installationPath } from '../src/installation.ts';
 import { createRouterServer } from '../src/proxy.ts';
 
 function fixture(): string {
@@ -118,13 +121,51 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
     const port = (server.address() as AddressInfo).port;
     for (const [model, { provider }] of registry) {
       if (!provider.api_key_env) continue;
+      if (provider.auth === 'claude_native') continue;
       const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', body: JSON.stringify({ model }) });
       assert.equal(response.status, 200); await response.text();
       assert.equal(received.at(-1), environment[provider.api_key_env]);
     }
-    assert.equal(received.length, [...registry.values()].filter(({ provider }) => provider.api_key_env).length);
+    assert.equal(received.length, [...registry.values()].filter(({ provider }) => provider.api_key_env && provider.auth !== 'claude_native').length);
   } finally {
     await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('launcher loads the project Anthropic key into the child only and honors an installed explicit file', () => {
+  const root = fixture();
+  const registry = loadRegistry();
+  const inherited = { PATH: '/original/path', CLAUDE_CONFIG_DIR: '/native/profile', DEEPSEEK_API_KEY: 'FAKE_OTHER' };
+  const original = structuredClone(inherited);
+  const ctx = context({ root, home: root });
+  try {
+    writeFileSync(join(root, 'envs/keys.env'), 'ANTHROPIC_API_KEY=FAKE_PROJECT_ANTHROPIC\nDEEPSEEK_API_KEY=FAKE_FILE_OTHER\n');
+    const loaded = loadLaunchEnvironment(registry, ctx, inherited);
+    const { environment } = buildLaunchConfig(registry, {}, loaded);
+    assert.equal(environment.ANTHROPIC_API_KEY, 'FAKE_PROJECT_ANTHROPIC');
+    assert.equal(environment.CLAUDE_CONFIG_DIR, inherited.CLAUDE_CONFIG_DIR);
+    assert.equal(environment.DEEPSEEK_API_KEY, undefined);
+    assert.deepEqual(inherited, original);
+    assert.equal(loadLaunchEnvironment(registry, ctx, { ANTHROPIC_API_KEY: 'FAKE_INHERITED' }).ANTHROPIC_API_KEY, 'FAKE_INHERITED');
+
+    const explicit = join(root, 'explicit.env');
+    writeFileSync(explicit, 'ANTHROPIC_API_KEY=FAKE_EXPLICIT_ANTHROPIC\n');
+    const metadata = installationPath(ctx);
+    mkdirSync(join(root, '.local/state/claude-sub-router'), { recursive: true });
+    writeFileSync(metadata, JSON.stringify({ backend: 'standalone', root, node: process.execPath, envFile: explicit }));
+    assert.equal(loadLaunchEnvironment(registry, ctx, inherited).ANTHROPIC_API_KEY, 'FAKE_EXPLICIT_ANTHROPIC');
+    writeFileSync(explicit, 'ANTHROPIC_API_KEY=\n');
+    assert.equal(buildLaunchConfig(registry, {}, loadLaunchEnvironment(registry, ctx, inherited)).environment.ANTHROPIC_API_KEY, undefined);
+    rmSync(explicit);
+    assert.equal(loadLaunchEnvironment(registry, ctx, inherited).ANTHROPIC_API_KEY, undefined);
+    rmSync(metadata);
+    writeFileSync(join(root, 'envs/other.env'), 'ANTHROPIC_API_KEY=FAKE_CONFLICT\n');
+    assert.throws(() => loadLaunchEnvironment(registry, ctx, inherited), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Conflicting ANTHROPIC_API_KEY/);
+      assert.equal(error.message.includes('FAKE_'), false);
+      return true;
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

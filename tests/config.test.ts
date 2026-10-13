@@ -89,6 +89,17 @@ test('subscription configuration cannot use provider keys or another upstream', 
   assert.throws(() => registryFor(value), /subscription auth/);
 });
 
+test('native Claude authentication requires the official upstream and the Anthropic key name', () => {
+  const value = fixture();
+  Object.assign(value.provider, { auth: 'claude_native', base_url: 'https://api.anthropic.com', api_key_env: 'ANTHROPIC_API_KEY' });
+  assert.equal(registryFor(value).size, 1);
+  for (const invalid of [{ base_url: 'https://example.test' }, { api_key_env: 'OTHER_API_KEY' }, { api_key_header: 'authorization' }]) {
+    assert.throws(() => registryFor({ ...value, provider: { ...value.provider, ...invalid } }), /native auth/);
+  }
+  const { api_key_env: _key, ...provider } = value.provider;
+  assert.throws(() => registryFor({ ...value, provider }), /native auth/);
+});
+
 test('reasoning maps every configured effort without mutating other fields', () => {
   for (const entry of loadRegistry().values()) {
     for (const [effort, expected] of Object.entries(entry.model.reasoning?.mapping ?? {})) {
@@ -120,7 +131,9 @@ test('settings and launcher preserve the native profile and apply routing only t
   assert.equal(environment.ANTHROPIC_BASE_URL, 'http://127.0.0.1:18765');
   assert.equal(environment.ANTHROPIC_DEFAULT_MODEL, settings.model);
   assert.equal(environment.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '900000');
-  for (const name of Object.keys(inherited).filter(name => name !== 'PATH')) assert.equal(environment[name], undefined);
+  assert.equal(environment.ANTHROPIC_API_KEY, inherited.ANTHROPIC_API_KEY);
+  assert.equal(environment.CLAUDE_CODE_OAUTH_TOKEN, inherited.CLAUDE_CODE_OAUTH_TOKEN);
+  for (const name of Object.keys(inherited).filter(name => !['PATH', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].includes(name))) assert.equal(environment[name], undefined);
   assert.deepEqual({ existing, inherited }, original);
   const modelSettings = settings.modelSettings as Record<string, Record<string, unknown>>;
   assert.equal(modelSettings['kimi-k3']?.autoCompactWindow, 800000);
@@ -161,11 +174,11 @@ test('M3 strips unsupported effort without mutating thinking, tools, history or 
 });
 
 test('authentication headers are split and response secrets are excluded', () => {
-  const incoming = new Headers({ authorization: 'Bearer FAKE_OAUTH', 'x-router-token': 'FAKE_LOCAL', 'x-api-key': 'FAKE_LOCAL', 'anthropic-beta': 'oauth-2025-04-20,test-feature', 'x-stainless-runtime': 'node' });
+  const incoming = new Headers({ authorization: 'Bearer FAKE_OAUTH', 'x-router-token': 'FAKE_LOCAL', 'anthropic-beta': 'oauth-2025-04-20,test-feature', 'x-stainless-runtime': 'node' });
   for (const { provider } of loadRegistry().values()) {
     const headers = upstreamHeaders(incoming, provider, { [provider.api_key_env ?? '']: 'FAKE_PROVIDER_KEY' });
     assert.equal(headers.has('x-router-token'), false);
-    if (provider.auth === 'claude_subscription') {
+    if (provider.auth === 'claude_subscription' || provider.auth === 'claude_native') {
       assert.equal(headers.get('authorization'), 'Bearer FAKE_OAUTH');
       assert.equal(headers.has('x-api-key'), false);
       assert.equal(headers.get('x-stainless-runtime'), 'node');
@@ -185,4 +198,22 @@ test('authentication headers are split and response secrets are excluded', () =>
   }
   const headers = responseHeaders(new Headers({ 'content-type': 'application/json', 'retry-after': '7', 'request-id': 'fake-id', 'anthropic-ratelimit-unified-status': 'rejected', 'authorization': 'FAKE', 'set-cookie': 'FAKE', 'content-encoding': 'gzip', 'content-length': '999' }));
   assert.deepEqual(Object.keys(headers).sort(), ['anthropic-ratelimit-unified-status', 'content-type', 'request-id', 'retry-after']);
+});
+
+test('native API requests forward the selected client key and never substitute server credentials', () => {
+  const provider = loadRegistry().get('claude-sonnet-5-5')!.provider;
+  const environment = { ANTHROPIC_API_KEY: 'FAKE_SERVER_KEY' };
+  const incoming = new Headers({ 'x-api-key': 'FAKE_CLIENT_KEY', authorization: 'Bearer FAKE_UNUSED_OAUTH', 'anthropic-beta': 'oauth-2025-04-20,test-feature', 'x-app': 'cli', 'x-stainless-runtime': 'node' });
+  const headers = upstreamHeaders(incoming, provider, environment);
+  assert.equal(headers.get('x-api-key'), 'FAKE_CLIENT_KEY');
+  assert.equal(headers.get('authorization'), null);
+  assert.equal(headers.get('anthropic-beta'), 'test-feature');
+  assert.equal(headers.get('x-app'), 'cli');
+  assert.equal(headers.get('x-stainless-runtime'), 'node');
+  assert.equal(incoming.get('authorization'), 'Bearer FAKE_UNUSED_OAUTH');
+  assert.equal(upstreamHeaders(new Headers({ authorization: 'Bearer FAKE_OAUTH' }), provider, environment).get('x-api-key'), null);
+  assert.throws(() => upstreamHeaders(new Headers(), provider, environment), /API key or bearer/);
+  assert.throws(() => upstreamHeaders(new Headers({ 'x-api-key': '', authorization: 'Bearer FAKE_OAUTH' }), provider, environment), /invalid header/);
+  assert.throws(() => upstreamHeaders(new Headers({ 'x-api-key': 'FAKE_é' }), provider, environment), /invalid header/);
+  assert.equal(upstreamHeaders(new Headers({ 'x-api-key': 'FAKE_KEY', 'anthropic-beta': 'oauth-2025-04-20' }), provider, {}).has('anthropic-beta'), false);
 });

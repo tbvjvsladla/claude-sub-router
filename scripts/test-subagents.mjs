@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const registry = loadRegistry();
 const parentModel = process.env.SUBAGENT_TEST_MAIN_MODEL || 'deepseek-flash';
 const requested = process.argv.slice(2);
-const models = requested.length ? requested : [...registry].filter(([, entry]) => entry.provider.auth !== 'claude_subscription').map(([id]) => id);
+const models = requested.length ? requested : [...registry].filter(([, entry]) => (entry.provider.auth ?? 'api_key') === 'api_key').map(([id]) => id);
 for (const model of [parentModel, ...models]) if (!registry.has(model)) throw new Error(`Unknown registered model: ${model}`);
 const directory = mkdtempSync(join(tmpdir(), 'claude-sub-agent-e2e-'));
 const artifact = join(root, 'artifacts/subagents-e2e.json');

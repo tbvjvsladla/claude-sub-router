@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { isObject } from './config.ts';
+import { isObject, NATIVE_AUTH_FEATURE } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from './subagents.ts';
 
@@ -35,14 +35,24 @@ export function applyReasoning(body: JsonObject, model: Model): JsonObject {
 
 export function upstreamHeaders(incoming: Headers, provider: Provider, environment: NodeJS.ProcessEnv): Headers {
   const headers = new Headers({ 'content-type': 'application/json', 'anthropic-version': incoming.get('anthropic-version') ?? '2023-06-01' });
-  if (provider.auth === 'claude_subscription') {
-    if (provider.base_url.replace(/\/+$/, '') !== 'https://api.anthropic.com') throw new RouterError(500, 'Invalid subscription upstream');
+  if (provider.auth === 'claude_subscription' || provider.auth === 'claude_native') {
+    if (provider.base_url.replace(/\/+$/, '') !== 'https://api.anthropic.com') throw new RouterError(500, 'Invalid Claude upstream');
+    const key = provider.auth === 'claude_native' ? incoming.get('x-api-key') : null;
     const authorization = incoming.get('authorization') ?? '';
-    if (!/^Bearer [\x21-\x7e]+$/i.test(authorization)) throw new RouterError(401, 'Claude subscription bearer authorization is required');
+    if (key !== null) {
+      if (!key.trim() || !/^[\x20-\x7e]+$/.test(key)) throw new RouterError(401, 'Claude API key contains invalid header characters');
+    } else if (!/^Bearer [\x21-\x7e]+$/i.test(authorization)) {
+      throw new RouterError(401, provider.auth === 'claude_native' ? 'Claude API key or bearer authorization is required' : 'Claude subscription bearer authorization is required');
+    }
     for (const [name, value] of incoming) {
       if (['anthropic-', 'x-claude-code-', 'x-stainless-'].some(prefix => name.startsWith(prefix)) || ['user-agent', 'x-app'].includes(name)) headers.set(name, value);
     }
-    headers.set('authorization', authorization);
+    // Claude chooses the credential per session. Never substitute a server key
+    // for a rejected interactive key, or fall back from a failed API request.
+    if (key !== null) {
+      headers.set('x-api-key', key);
+      stripOAuthBetas(headers);
+    } else headers.set('authorization', authorization);
     return headers;
   }
   if (provider.auth && provider.auth !== 'api_key') throw new RouterError(500, 'Unsupported upstream auth');
@@ -51,9 +61,16 @@ export function upstreamHeaders(incoming: Headers, provider: Provider, environme
   if (!/^[\x20-\x7e]+$/.test(key)) throw new RouterError(503, 'Provider API key contains invalid header characters');
   if (provider.api_key_header === 'authorization') headers.set('authorization', `Bearer ${key}`);
   else headers.set('x-api-key', key);
-  const betas = (incoming.get('anthropic-beta') ?? '').split(',').map(value => value.trim()).filter(value => value && !value.toLowerCase().startsWith('oauth-'));
-  if (betas.length) headers.set('anthropic-beta', betas.join(','));
+  const beta = incoming.get('anthropic-beta');
+  if (beta) headers.set('anthropic-beta', beta);
+  stripOAuthBetas(headers);
   return headers;
+}
+
+function stripOAuthBetas(headers: Headers): void {
+  const betas = (headers.get('anthropic-beta') ?? '').split(',').map(value => value.trim()).filter(value => value && !value.toLowerCase().startsWith('oauth-'));
+  if (betas.length) headers.set('anthropic-beta', betas.join(','));
+  else headers.delete('anthropic-beta');
 }
 
 export function responseHeaders(incoming: Headers): Record<string, string> {
@@ -126,7 +143,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
+      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE, NATIVE_AUTH_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
       return;
     }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
@@ -151,7 +168,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const counting = url.pathname.endsWith('/count_tokens');
     const payload = counting && entry.model.reasoning?.mode !== 'omit' ? { ...body } : applyReasoning(body, entry.model);
     const headers = upstreamHeaders(incoming, entry.provider, environment);
-    log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
+    log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, auth: headers.has('x-api-key') ? 'api_key' : 'bearer', mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
     payload.model = entry.model.upstream_model;
     const controller = new AbortController();
     const aborted = () => controller.abort();

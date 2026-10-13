@@ -3,13 +3,14 @@ provider:
   name: Anthropic
   protocol: anthropic
   base_url: https://api.anthropic.com
-  auth: claude_subscription
+  auth: claude_native
+  api_key_env: ANTHROPIC_API_KEY
 
 models:
   - id: claude-sonnet-5-5
     upstream_model: claude-sonnet-5-5
-    display_name: Sonnet 5.5 (Subscription)
-    description: Claude Max subscription
+    display_name: Sonnet 5.5
+    description: Claude Code login or Anthropic API key
     default: true
     reasoning:
       mode: observe

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
+export const NATIVE_AUTH_FEATURE = 'claude-native-auth';
 export type JsonObject = Record<string, unknown>;
 export interface Reasoning {
   mode: 'observe' | 'map' | 'omit';
@@ -25,7 +26,7 @@ export interface Provider {
   name: string;
   protocol: 'anthropic';
   base_url: string;
-  auth?: 'api_key' | 'claude_subscription';
+  auth?: 'api_key' | 'claude_subscription' | 'claude_native';
   api_key_env?: string;
   api_key_header?: 'x-api-key' | 'authorization';
 }
@@ -116,6 +117,10 @@ export function loadRegistry(directory = join(ROOT, 'config/providers')): Regist
     } else if (auth === 'claude_subscription') {
       if ('api_key_env' in provider || 'api_key_header' in provider || String(provider.base_url).replace(/\/+$/, '') !== 'https://api.anthropic.com') {
         throw new ConfigError(`${name}: subscription auth requires the official Anthropic URL and no api_key_env or api_key_header`);
+      }
+    } else if (auth === 'claude_native') {
+      if (String(provider.base_url).replace(/\/+$/, '') !== 'https://api.anthropic.com' || provider.api_key_env !== 'ANTHROPIC_API_KEY' || 'api_key_header' in provider) {
+        throw new ConfigError(`${name}: native auth requires the official Anthropic URL, api_key_env: ANTHROPIC_API_KEY and no api_key_header`);
       }
     } else throw new ConfigError(`${name}: unsupported auth type`);
     let url: URL;

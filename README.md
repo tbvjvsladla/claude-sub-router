@@ -1,7 +1,7 @@
 # claude-sub
 
 기존 `claude` 명령의 로그인·플러그인·대화 기록을 공유하면서 `claude-sub`에서
-구독 Sonnet·DeepSeek·Kimi·MiniMax M3·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
+Sonnet(기존 로그인 또는 Anthropic API)·DeepSeek·Kimi·MiniMax M3·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
@@ -11,7 +11,7 @@ Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ```text
 claude-sub → 로컬 라우터(Node.js / systemd 또는 백그라운드 프로세스) → Provider API
-claude     → 기존 Claude Code 구독 환경
+claude     → 기존 Claude Code 인증 환경
 ```
 
 `.bashrc`는 명령을 찾기 위한 PATH만 등록합니다. 사용자 systemd가 동작하면 기존처럼
@@ -30,13 +30,15 @@ systemd 서비스만으로 WSL 인스턴스가 계속 살아 있는 것은 아�
 ## 설치
 
 Node.js **22.18.0 이상**, npm, bash, 설치된 Claude Code가 필요합니다.
+Sonnet은 기존 Claude Code 로그인 또는 Anthropic API 키로 사용할 수 있으며,
+API 키를 쓰는 경우 Pro/Max 구독 가입은 필요하지 않습니다.
 일반 Ubuntu에서는 일반 사용자 계정으로 설치하며 `sudo`는 사용하지 않습니다.
 Vast.ai 같은 root 컨테이너에서는 해당 root 계정으로 설치할 수 있습니다.
 
 ```bash
 cd claude-router
 cp envs/.env.example envs/keys.env
-chmod 600 envs/keys.env
+chmod 600 envs/keys.env   # 여러종류의 키가 있을 시 chmod 600 envs/*.env
 nano envs/keys.env
 bash install.sh
 source ./env.bash
@@ -44,7 +46,7 @@ claude-sub
 ```
 
 `envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`,
-`OPENROUTER_API_KEY` 칸이 있습니다.
+`OPENROUTER_API_KEY`, 선택 항목인 `ANTHROPIC_API_KEY` 칸이 있습니다.
 MiniMax M3는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
@@ -123,6 +125,7 @@ standalone 로그는 `router.log`에 누적되며 `logs`는 최근 100줄(최대
 claude-sub
 claude-sub --check
 claude-sub --model deepseek-pro
+claude-sub -p "짧게 인사해줘" --model sonnet
 claude-sub-router start
 claude-sub-router restart
 claude-sub-router status
@@ -139,8 +142,11 @@ YAML이나 키 파일 수정 후에는 라우터를 재시작하고 Claude Code�
 같은 컴퓨터의 다른 사용자·프로세스도 API 비용을 발생시킬 수 있습니다.
 외부에 노출하지 마세요. 자세한 사항은 [SECURITY.md](SECURITY.md)를 참고하세요.
 
-Provider 키는 서버에서만 읽으며 `.bashrc`에 전역 export하지 않습니다.
-키 파일이 없거나 비어 있어도 서버는 시작하며 해당 모델 호출만 실패합니다.
+서드파티 Provider 키는 서버에서만 읽으며 `.bashrc`에 전역 export하지 않습니다.
+Anthropic 키는 Claude Code의 인증 선택을 위해 `claude-sub` 자식 프로세스에도 전달합니다.
+키 파일이 없거나 비어 있어도 서버는 시작합니다. 서드파티 모델은 해당 Provider
+키가 없으면 호출에 실패하며, Sonnet은 프로젝트 Anthropic 키가 없으면 기존
+Claude Code 인증을 사용합니다.
 잘못된 키는 Provider의 인증 오류를 그대로 반환하고 다른 모델로 대체하지 않습니다.
 수동 실행과 systemd 실행 모두 Node의 dotenv 파서를 사용하며 키 파일을 셸로 실행하지 않습니다.
 
@@ -165,6 +171,53 @@ claude --resume SESSION_ID
 설정 경로와 실행별 덮어쓰기 동작은
 [공식 환경변수 문서](https://code.claude.com/docs/en/env-vars)와
 [공식 설정 문서](https://code.claude.com/docs/en/settings#change-a-setting-for-one-session)를 따릅니다.
+
+### Sonnet 로그인과 Anthropic API 키
+
+`config/providers/antropic.yaml`의 `auth: claude_native`는 Claude Code가 선택한
+인증을 공식 Anthropic API에 전달합니다. 선택 항목인 `ANTHROPIC_API_KEY`를 기존
+`envs/*.env` 파일에 추가하면 구독 플랜 없이도 Sonnet을 호출할 수 있습니다.
+`--env-file`로 설치했다면 런처도 그 파일만 읽습니다. 환경변수·파일 우선순위와
+빈 값·중복 검사 규칙은 다른 Provider 키와 같습니다.
+
+기존 설치에 API 키를 추가할 때는 사용 중인 키 파일을 열어
+`ANTHROPIC_API_KEY` 항목을 한 번만 추가하세요. `.env.example`을 기존 파일에
+덮어쓸 필요는 없습니다. `--env-file`로 설치했다면 지정한 파일을 수정하세요.
+키를 저장한 뒤 프로젝트 디렉터리에서 다음 순서로 확인합니다.
+
+```bash
+npm run build
+claude-sub-router restart
+claude-sub --check
+claude-sub -p "짧게 인사해줘" --model sonnet
+```
+
+`--check`의 `anthropic_auth.api_key_configured`가 `true`, `print`가 `api_key`이면
+Sonnet의 `-p` 호출에 API 키를 전달합니다. `api_key_source`가 `provider_env_file`이면
+프로젝트 키 파일에서, `inherited_environment`이면 실행한 셸 환경에서 가져온 키입니다.
+키를 추가한 뒤에는 실행 중인 대화형 세션도 새로 시작하세요.
+
+| 실행 | 프로젝트 Anthropic 키 있음 | 프로젝트 키 없음 또는 빈 값 |
+| --- | --- | --- |
+| `claude-sub -p`의 Sonnet(기본 모델·`sonnet`·등록 ID) | API 키 사용 | Claude Code의 기존 인증 선택 |
+| 대화형 `claude-sub`의 Sonnet | Claude Code의 키 승인·거절 정책 적용 | Claude Code의 기존 인증 선택 |
+| `claude`, `claude -p` | 기존 Claude Code 설정·셸 환경에 따름 | 기존 Claude Code 설정·셸 환경에 따름 |
+
+대화형에서는 Claude Code가 키 사용을 한 번 확인하고 선택을 기억합니다.
+설치된 버전의 `/config`에서 “Use custom API key”를 변경하고 `/status`에서 실제
+인증을 확인할 수 있습니다. `-p`는 키가 있으면 승인 창 없이 API를 사용합니다.
+이 동작은 [Claude Code 공식 인증 우선순위](https://code.claude.com/docs/en/authentication#authentication-precedence)를 계승합니다.
+라우터는 요청에 담긴 API 키 또는 Bearer 인증을 전달하며, 서버에 키가 있다는
+이유로 구독 요청을 API로 바꾸지 않습니다. 잘못된 키·잔액 부족 등 API 오류가 나도
+구독 인증으로 자동 전환하지 않습니다. `ANTHROPIC_API_KEY`와 기존
+`CLAUDE_CODE_OAUTH_TOKEN`은 해당 자식 프로세스에만 전달하며 프로필·사용자 설정에
+키를 저장하지 않습니다. `subagents.yaml`의 모델 정책은 그대로 적용됩니다.
+
+키 파일은 `source`하거나 전역 `export`하지 마세요. 직접 셸에
+`ANTHROPIC_API_KEY`를 export하면 일반 `claude`도 Claude Code의 원래 규칙에 따라
+그 키를 보게 됩니다. 프로젝트 파일만 수정하면 일반 `claude`에는 전달되지 않습니다.
+`claude-sub --check`의 `anthropic_auth`에는 키 설정 여부와 모드 정책만 표시하며
+키 값은 표시하지 않습니다.
 
 ### 기능별 모델 지정
 
@@ -329,6 +382,7 @@ npm ci --include=dev --ignore-scripts
 npm run check
 npm test
 npm run build
+npm run test:auth
 node dist/cli.js launch --check
 node dist/cli.js serve
 ```
@@ -342,6 +396,10 @@ node dist/cli.js serve
 요청 본문 제한은 32 MiB입니다. 개발 서버에 한해 `serve --port 28765`처럼
 다른 5자리 포트를 사용할 수 있으며 설치된 명령은 18765를 사용합니다.
 
+`test:auth`는 설치된 Claude CLI를 임시 프로필·가짜 Anthropic 서버로 실행합니다.
+`-p`의 API 키 사용, 부모 환경 유지, 빈 키에서 OAuth 계승, 인증 오류에서
+OAuth로 자동 전환하지 않는 동작을 확인하며 실제 비용은 발생하지 않습니다.
+
 실제 CLI 연결 테스트는 **구독 한도/API 비용을 사용**합니다. 설치·로그인·키 설정 후 실행하세요.
 
 ```bash
@@ -353,6 +411,34 @@ node scripts/test-cli.mjs deepseek-flash
 기본 실행은 원본 Sonnet 및 라우터의 모든 모델을 검사하며, 모델 인수는 해당
 `claude-sub` 모델만 검사합니다. 응답 본문·키를 제외한 요약만
 `artifacts/cli-e2e.json`에 저장합니다. 이 디렉터리는 배포하지 않습니다.
+
+Anthropic 인증을 실제 서비스까지 확인하려면 키 소유자가 기존 키 파일에
+`ANTHROPIC_API_KEY`를 직접 추가한 뒤 아래 테스트를 실행합니다. 이미 키가 설정되어
+있다면 추가 입력은 필요하지 않습니다. 키 값을 채팅이나
+공개 로그에 붙여 넣지 마세요.
+
+```bash
+claude-sub-router restart
+npm run test:cli -- --anthropic-auth
+```
+
+이 테스트는 기존 인증의 `claude -p --model sonnet`을 한 번, API 방식의
+`claude-sub -p`를 명시 모델 ID·`sonnet` 별칭·모델 인수 생략으로 각각 한 번
+호출합니다. 라우터 로그의 인증 종류(`api_key`)와 HTTP 200도 검증합니다.
+키가 없으면 호출 전에 중단합니다. 실제 구독 한도/API 비용을 사용합니다.
+대화형은 `claude-sub`에서 키 승인·거절과 `/status`를 직접 확인하세요.
+
+2026-10-13에 Claude Code **2.1.296**으로 다음 실제 연결을 검증했습니다.
+
+| 호출 | 확인 결과 |
+| --- | --- |
+| `claude -p --model sonnet` | 기존 인증 환경에서 성공 |
+| `claude-sub -p --model claude-sonnet-5-5` | API 인증·HTTP 200 |
+| `claude-sub -p --model sonnet` | API 인증·HTTP 200 |
+| `claude-sub -p`(기본 Sonnet) | API 인증·HTTP 200 |
+
+자동 테스트 44개, 오프라인 CLI 인증 테스트, 타입 검사·빌드·배포 패키지 검증도
+통과했습니다. 대화형 승인 화면은 이 자동 검증에 포함하지 않았습니다.
 
 실제 **서브에이전트 호출** 검증도 API 비용을 사용하며 CI에서는 자동 실행하지 않습니다.
 

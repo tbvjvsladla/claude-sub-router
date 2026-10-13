@@ -14,6 +14,10 @@ repository is secret-free. Inspect the staged diff before publishing and revoke
 any previously published keys.
 
 Subscription authorization is forwarded only to the official Anthropic API.
+Native Anthropic routing also accepts the API key selected by the Claude client.
+The router never substitutes its own Anthropic key for a client's OAuth request.
+Only `claude-sub` receives a project Anthropic key in its child environment;
+other provider keys stay on the server. Key files are never globally exported.
 Provider API-key requests strip incoming subscription authorization and OAuth beta
 headers. Bearer-authenticated providers receive a new Authorization header built
 only from their configured API key, never the incoming subscription token.

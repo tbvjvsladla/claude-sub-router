@@ -5,11 +5,11 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
-import { loadRegistry } from '../src/config.ts';
+import { loadRegistry, NATIVE_AUTH_FEATURE } from '../src/config.ts';
 import { createRouterServer } from '../src/proxy.ts';
-import { COMPACTION_MODEL_HEADER } from '../src/subagents.ts';
+import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from '../src/subagents.ts';
 import type { JsonObject } from '../src/config.ts';
-import { assertRouterPolicy } from '../src/launcher.ts';
+import { assertRouterCompatibility } from '../src/launcher.ts';
 import { defaultModelPolicy } from '../src/subagents.ts';
 
 async function listen(server: Server): Promise<string> {
@@ -19,6 +19,56 @@ async function listen(server: Server): Promise<string> {
 async function close(server: Server): Promise<void> {
   await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 }
+
+test('concurrent native login and API sessions retain their credentials, including token counts and provider errors', async () => {
+  const calls: { url: string; model: string; headers: Headers }[] = [];
+  const logs: unknown[] = [];
+  let status = 200;
+  const proxy = createRouterServer(loadRegistry(), {
+    environment: { ANTHROPIC_API_KEY: 'FAKE_UNUSED_SERVER_KEY', DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK_KEY' },
+    fetch: async (input, init) => {
+      calls.push({ url: String(input), model: JSON.parse(String(init?.body)).model, headers: new Headers(init?.headers) });
+      return Response.json({ type: status === 200 ? 'message' : 'error' }, { status });
+    },
+    log: (event, metadata) => logs.push({ event, metadata }),
+  });
+  const base = await listen(proxy);
+  async function send(headers: Record<string, string>, path = '/v1/messages', model = 'claude-sonnet-5-5') {
+    const response = await fetch(`${base}${path}`, { method: 'POST', headers: { 'anthropic-beta': 'oauth-2025-04-20,test-feature', ...headers }, body: JSON.stringify({ model }) });
+    await response.text(); return response.status;
+  }
+  try {
+    for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+      assert.deepEqual(await Promise.all([
+        send({ 'x-api-key': 'FAKE_CLIENT_KEY' }, path),
+        send({ authorization: 'Bearer FAKE_LOGIN_TOKEN' }, path),
+      ]), [200, 200]);
+      const pair = calls.slice(-2);
+      const api = pair.find(call => call.headers.has('x-api-key'))!;
+      const login = pair.find(call => call.headers.has('authorization'))!;
+      assert.equal(api.headers.get('x-api-key'), 'FAKE_CLIENT_KEY');
+      assert.equal(api.headers.has('authorization'), false);
+      assert.equal(api.headers.get('anthropic-beta'), 'test-feature');
+      assert.equal(login.headers.get('authorization'), 'Bearer FAKE_LOGIN_TOKEN');
+      assert.equal(login.headers.has('x-api-key'), false);
+      assert.equal(login.headers.get('anthropic-beta'), 'oauth-2025-04-20,test-feature');
+      assert.ok(pair.every(call => call.url === `https://api.anthropic.com${path}` && call.model === 'claude-sonnet-5-5'));
+    }
+    assert.equal(await send({ 'x-api-key': 'FAKE_CLIENT_KEY', authorization: 'Bearer FAKE_LOGIN_TOKEN' }, '/v1/messages', 'deepseek-flash'), 200);
+    assert.equal(calls.at(-1)!.headers.get('x-api-key'), 'FAKE_DEEPSEEK_KEY');
+    assert.equal(calls.at(-1)!.headers.has('authorization'), false);
+    assert.equal(calls.at(-1)!.headers.get('anthropic-beta'), 'test-feature');
+    const before = calls.length;
+    status = 401;
+    assert.equal(await send({ 'x-api-key': 'FAKE_CLIENT_KEY' }), 401);
+    assert.equal(calls.length, before + 1);
+    assert.equal(calls.at(-1)!.headers.get('x-api-key'), 'FAKE_CLIENT_KEY');
+    assert.equal(calls.at(-1)!.headers.has('authorization'), false);
+    assert.equal(await send({}), 401);
+    assert.equal(calls.length, before + 1);
+    assert.equal(JSON.stringify(logs).includes('FAKE_'), false);
+  } finally { await close(proxy); }
+});
 
 test('compaction policy is isolated per client and official request class; other requests keep their model', async () => {
   const registry = loadRegistry();
@@ -43,9 +93,11 @@ test('compaction policy is isolated per client and official request class; other
   }
   try {
     const policy = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
-    await assertRouterPolicy(policy, (_input, init) => fetch(`${base}/health`, init));
-    await assertRouterPolicy(defaultModelPolicy(), async () => { throw new Error('inherit must not require router features'); });
-    await assert.rejects(() => assertRouterPolicy(policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
+    await assertRouterCompatibility(registry, policy, (_input, init) => fetch(`${base}/health`, init));
+    await assertRouterCompatibility(new Map(), defaultModelPolicy(), async () => { throw new Error('inherit without native auth must not require router features'); });
+    await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
+    await assert.rejects(() => assertRouterCompatibility(registry, defaultModelPolicy(), async () => Response.json({ features: [COMPACTION_POLICY_FEATURE] })), /claude-sub-router restart/);
+    await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ features: [NATIVE_AUTH_FEATURE] })), /claude-sub-router restart/);
     for (const requestClass of [undefined, 'main', 'subagent', 'workflow', 'auxiliary', 'future-class']) {
       const headers: Record<string, string> = { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-compaction': 'manual' };
       if (requestClass) headers['x-claude-code-request-class'] = requestClass;
@@ -132,7 +184,7 @@ test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider e
         assert.equal(call.url.endsWith(`${path}?beta=true`), true);
         assert.equal(call.body.model, model.upstream_model);
         assert.equal(call.headers['x-router-token'], undefined);
-        if (provider.auth === 'claude_subscription') {
+        if (provider.auth === 'claude_subscription' || provider.auth === 'claude_native') {
           assert.equal(call.headers.authorization, 'Bearer FAKE_OAUTH'); assert.equal(call.headers['x-api-key'], undefined);
         } else {
           if (provider.api_key_header === 'authorization') {
@@ -155,7 +207,7 @@ test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider e
     for (const [modelId, { provider }] of registry) {
       if (provider.api_key_env) delete environment[provider.api_key_env];
       const response = await fetch(`${base}/v1/messages`, { method: 'POST', body: JSON.stringify({ model: modelId }) });
-      assert.equal(response.status, provider.auth === 'claude_subscription' ? 401 : 503); await response.body?.cancel();
+      assert.equal(response.status, provider.auth === 'claude_subscription' || provider.auth === 'claude_native' ? 401 : 503); await response.body?.cancel();
     }
     assert.equal(calls.length, before);
     assert.equal((await fetch(`${base}/api/hello`, { method: 'HEAD' })).status, 404);
