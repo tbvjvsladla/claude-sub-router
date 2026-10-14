@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { stringify } from 'yaml';
-import { ConfigError, getDefaultModel, loadRegistry, validateReasoning } from '../src/config.ts';
+import { ConfigError, getDefaultModel, loadRegistry, REASONING_LEVELS, validateReasoning } from '../src/config.ts';
+import type { Model } from '../src/config.ts';
 import { buildSettings } from '../src/settings.ts';
 import { buildLaunchConfig } from '../src/launcher.ts';
 import { applyReasoning, responseHeaders, upstreamHeaders } from '../src/proxy.ts';
@@ -28,10 +29,12 @@ test('registry preserves the existing providers, defaults and YAML aliases', () 
   assert.equal(minimax.provider.api_key_env, 'MINIMAX_API_KEY');
   assert.equal(minimax.model.upstream_model, 'MiniMax-M3');
   assert.deepEqual(minimax.model.context, { window: 1000000, auto_compact_threshold: 800000 });
-  assert.equal(minimax.model.reasoning?.mode, 'omit');
+  assert.equal(minimax.model.reasoning?.mode, 'map');
+  assert.deepEqual(minimax.model.reasoning?.mapping?.none, { action: 'disable' });
+  for (const level of REASONING_LEVELS.slice(1)) assert.deepEqual(minimax.model.reasoning?.mapping?.[level], { action: 'omit' });
 });
 
-test('OpenRouter GPT models preserve verified IDs, 900k policy and every supported Claude effort', () => {
+test('OpenRouter GPT models share positive efforts but declare different none support', () => {
   const registry = loadRegistry();
   for (const id of ['gpt-6.1-sol', 'gpt-6-luna']) {
     const entry = registry.get(id)!;
@@ -43,10 +46,11 @@ test('OpenRouter GPT models preserve verified IDs, 900k policy and every support
     assert.equal(entry.model.upstream_model, `openai/${id}`);
     assert.deepEqual(entry.model.context, { window: 900000, auto_compact_threshold: 800000 });
     assert.equal(entry.model.reasoning?.mode, 'map');
-    assert.deepEqual(entry.model.reasoning?.mapping, { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
+    assert.deepEqual(entry.model.reasoning?.mapping, { none: id === 'gpt-6-luna' ? 'none' : { action: 'error' }, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
     assert.equal(entry.model.reasoning?.unsupported_level, 'error');
   }
-  assert.deepEqual(registry.get('gpt-6.1-sol')?.model.reasoning, registry.get('gpt-6-luna')?.model.reasoning);
+  assert.deepEqual(registry.get('claude-sonnet-5-5')?.model.reasoning?.mapping?.none, { action: 'error' });
+  for (const id of ['deepseek-pro', 'deepseek-flash', 'kimi-k3']) assert.deepEqual(registry.get(id)?.model.reasoning?.mapping?.none, { action: 'disable' });
 });
 
 test('registry rejects duplicates, unknown fields and invalid types', () => {
@@ -105,7 +109,13 @@ test('reasoning maps every configured effort without mutating other fields', () 
     for (const [effort, expected] of Object.entries(entry.model.reasoning?.mapping ?? {})) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'adaptive' }, tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      assert.deepEqual(applyReasoning(body, entry.model), { ...original, output_config: { ...original.output_config, effort: expected } });
+      if (typeof expected === 'string') {
+        assert.deepEqual(applyReasoning(body, entry.model), { ...original, output_config: { ...original.output_config, effort: expected } });
+      } else if (expected.action === 'error') {
+        assert.throws(() => applyReasoning(body, entry.model), /does not support reasoning effort/);
+      } else {
+        assert.deepEqual(applyReasoning(body, entry.model), { ...original, output_config: { format: { type: 'json_schema' } }, thinking: expected.action === 'disable' ? { type: 'disabled' } : original.thinking });
+      }
       assert.deepEqual(body, original);
     }
     if (entry.model.reasoning?.mode === 'map') {
@@ -116,6 +126,44 @@ test('reasoning maps every configured effort without mutating other fields', () 
       const invalid = structuredClone(entry.model.reasoning);
       Object.assign(invalid.mapping!, { low: null });
       assert.throws(() => validateReasoning(invalid, 'test'), /non-empty string/);
+    }
+  }
+});
+
+test('map configurations require exactly the six common levels and explicit valid actions', () => {
+  assert.deepEqual(REASONING_LEVELS, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  const reasoning = loadRegistry().get('gpt-6-luna')!.model.reasoning!;
+  for (const level of REASONING_LEVELS) {
+    const incomplete = structuredClone(reasoning);
+    delete incomplete.mapping![level];
+    assert.throws(() => validateReasoning(incomplete, 'test'), new RegExp(`missing level ${level}`));
+  }
+  for (const invalid of [null, '', [], 4, {}, { action: 'unknown' }, { action: 'disable', unexpected: true }]) {
+    assert.throws(() => validateReasoning({ ...reasoning, mapping: { ...reasoning.mapping, none: invalid } }, 'test'), ConfigError);
+  }
+  assert.throws(() => validateReasoning({ ...reasoning, mapping: { ...reasoning.mapping, minimal: 'low' } }, 'test'), /unknown level minimal/);
+  assert.throws(() => validateReasoning({ ...reasoning, mapping: { ...reasoning.mapping, low: { action: 'disable' } } }, 'test'), /disable is only valid for none/);
+});
+
+test('thinking off normalizes to none even with a stale positive effort or no output_config', () => {
+  const registry = loadRegistry();
+  for (const { model } of registry.values()) {
+    for (const effort of [...REASONING_LEVELS, null, undefined]) {
+      const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
+      const original = structuredClone(body);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5'].includes(model.id);
+      if (unsupported) {
+        assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
+        assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
+      } else {
+        const output_config = model.id === 'gpt-6-luna' ? { format: { type: 'json_schema' }, effort: 'none' } : { format: { type: 'json_schema' } };
+        assert.deepEqual(applyReasoning(body, model), { ...original, output_config });
+        assert.deepEqual(applyReasoning({ thinking: { type: 'disabled' } }, model), model.id === 'gpt-6-luna' ? { thinking: { type: 'disabled' }, output_config: { effort: 'none' } } : { thinking: { type: 'disabled' } });
+      }
+      assert.deepEqual(body, original);
+    }
+    for (const body of [{}, { output_config: null }, { output_config: { format: { type: 'json_schema' } }, thinking: { type: 'adaptive' } }]) {
+      assert.deepEqual(applyReasoning(body, model), body);
     }
   }
 });
@@ -156,9 +204,9 @@ test('launcher follows an explicitly selected native profile without copying use
   assert.deepEqual(inherited, { CLAUDE_CONFIG_DIR: '/custom/claude-profile', CLAUDE_CODE_PROJECT_DIR_NAME: 'shared-project' });
 });
 
-test('M3 strips unsupported effort without mutating thinking, tools, history or structured output', () => {
+test('M3 omits positive efforts, preserves thinking settings and explicitly disables for none', () => {
   const model = loadRegistry().get('minimax-m3')!.model;
-  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max', null]) {
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
     for (const thinking of [{ type: 'adaptive', display: 'updates' }, { type: 'disabled' }]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking, messages: [{ role: 'user', content: 'FAKE' }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
@@ -170,6 +218,20 @@ test('M3 strips unsupported effort without mutating thinking, tools, history or 
   assert.deepEqual(applyReasoning({ thinking: { type: 'adaptive' } }, model), { thinking: { type: 'adaptive' } });
   assert.deepEqual(applyReasoning({}, model), {});
   assert.throws(() => applyReasoning({ output_config: [] }, model), /must be an object/);
+  const body = { output_config: { effort: 'none' }, thinking: { type: 'adaptive', display: 'updates', budget_tokens: 8192 } };
+  assert.deepEqual(applyReasoning(body, model), { thinking: { type: 'disabled' } });
+  assert.equal(body.thinking.type, 'adaptive');
+});
+
+test('providers without effort controls can still omit every common level or observe requests', () => {
+  const model: Model = { id: 'no-effort', upstream_model: 'no-effort', display_name: 'No effort', reasoning: { mode: 'omit', source: { effort: 'output_config.effort', thinking: 'thinking' } } };
+  validateReasoning(model.reasoning, 'test');
+  for (const effort of REASONING_LEVELS) {
+    const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'adaptive' } };
+    assert.deepEqual(applyReasoning(body, model), { output_config: { format: { type: 'json_schema' } }, thinking: body.thinking });
+    assert.deepEqual(applyReasoning({ output_config: { effort } }, model), {});
+    assert.deepEqual(applyReasoning(body, { ...model, reasoning: { mode: 'observe' } }), body);
+  }
   for (const extra of [{ mapping: { low: 'low' } }, { unsupported_level: 'error' }]) assert.throws(() => validateReasoning({ ...model.reasoning, ...extra }, 'test'), /omit must not define/);
 });
 

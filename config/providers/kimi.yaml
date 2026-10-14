@@ -24,6 +24,8 @@ models:
         effort: output_config.effort
         thinking: thinking
       mapping:
+        # Kimi Coding serves thinking-off requests through K2.8 Preview.
+        none: { action: disable }
         low: low
         medium: high
         high: high

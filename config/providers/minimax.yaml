@@ -16,7 +16,16 @@ models:
       auto_compact_threshold: 800000
 
     reasoning:
-      mode: omit
+      mode: map
       source:
         effort: output_config.effort
         thinking: thinking
+      mapping:
+        none: { action: disable }
+        # M3 has an on/off toggle, but no configurable effort levels.
+        low: &omit_effort { action: omit }
+        medium: *omit_effort
+        high: *omit_effort
+        xhigh: *omit_effort
+        max: *omit_effort
+      unsupported_level: error

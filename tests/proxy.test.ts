@@ -5,7 +5,7 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
-import { loadRegistry, NATIVE_AUTH_FEATURE } from '../src/config.ts';
+import { loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE, REASONING_LEVELS } from '../src/config.ts';
 import { createRouterServer } from '../src/proxy.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from '../src/subagents.ts';
 import type { JsonObject } from '../src/config.ts';
@@ -96,8 +96,9 @@ test('compaction policy is isolated per client and official request class; other
     await assertRouterCompatibility(registry, policy, (_input, init) => fetch(`${base}/health`, init));
     await assertRouterCompatibility(new Map(), defaultModelPolicy(), async () => { throw new Error('inherit without native auth must not require router features'); });
     await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
-    await assert.rejects(() => assertRouterCompatibility(registry, defaultModelPolicy(), async () => Response.json({ features: [COMPACTION_POLICY_FEATURE] })), /claude-sub-router restart/);
-    await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ features: [NATIVE_AUTH_FEATURE] })), /claude-sub-router restart/);
+    await assert.rejects(() => assertRouterCompatibility(registry, defaultModelPolicy(), async () => Response.json({ features: [COMPACTION_POLICY_FEATURE, REASONING_FEATURE] })), /claude-sub-router restart/);
+    await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ features: [NATIVE_AUTH_FEATURE, REASONING_FEATURE] })), /claude-sub-router restart/);
+    await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ features: [NATIVE_AUTH_FEATURE, COMPACTION_POLICY_FEATURE] })), /claude-sub-router restart/);
     for (const requestClass of [undefined, 'main', 'subagent', 'workflow', 'auxiliary', 'future-class']) {
       const headers: Record<string, string> = { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-compaction': 'manual' };
       if (requestClass) headers['x-claude-code-request-class'] = requestClass;
@@ -194,8 +195,8 @@ test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider e
           }
           assert.equal(call.headers['anthropic-beta'], 'test-feature');
         }
-        if (model.reasoning?.mode === 'omit') assert.equal(call.body.output_config, undefined);
-        else if (path === '/v1/messages') assert.equal((call.body.output_config as Record<string, string>).effort, model.reasoning?.mode === 'map' ? model.reasoning.mapping?.xhigh : 'xhigh');
+        if (modelId === 'minimax-m3') assert.equal(call.body.output_config, undefined);
+        else assert.equal((call.body.output_config as Record<string, string>).effort, model.reasoning?.mode === 'map' ? model.reasoning.mapping?.xhigh : 'xhigh');
       }
     }
     assert.equal(calls.length, registry.size * 10);
@@ -212,6 +213,59 @@ test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider e
     assert.equal(calls.length, before);
     assert.equal((await fetch(`${base}/api/hello`, { method: 'HEAD' })).status, 404);
   } finally { await close(proxy); await close(upstream); }
+});
+
+test('six reasoning levels and the thinking toggle use each provider policy over HTTP', async () => {
+  const registry = loadRegistry();
+  const calls: JsonObject[] = [];
+  const environment: NodeJS.ProcessEnv = {};
+  for (const { provider } of registry.values()) if (provider.api_key_env) environment[provider.api_key_env] = 'FAKE_PROVIDER_KEY';
+  const proxy = createRouterServer(registry, { environment, fetch: async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return Response.json({ type: 'message' });
+  } });
+  const base = await listen(proxy);
+  // Expected wire values are independent of the YAML and mapping implementation.
+  const expected: Record<string, (string | null)[]> = {
+    'claude-sonnet-5-5': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'gpt-6.1-sol': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'gpt-6-luna': ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'deepseek-pro': [null, 'low', 'high', 'high', 'high', 'max'],
+    'deepseek-flash': [null, 'low', 'high', 'high', 'high', 'max'],
+    'kimi-k3': [null, 'low', 'high', 'high', 'max', 'max'],
+    'minimax-m3': [null, null, null, null, null, null],
+  };
+  try {
+    for (const [modelId, wireEfforts] of Object.entries(expected)) {
+      for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+        for (const [index, effort] of REASONING_LEVELS.entries()) {
+          // A disabled toggle overrides the old positive effort sent by Claude.
+          for (const toggleOff of [false, true]) {
+            const body = { model: modelId, max_tokens: 1024, thinking: toggleOff ? { type: 'disabled' } : { type: 'adaptive', display: 'updates', budget_tokens: 8192 }, output_config: { effort, format: { type: 'json_schema' } }, messages: [{ role: 'user', content: 'FAKE' }], tools: [{ name: 'Read' }] };
+            const before = calls.length;
+            const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_OAUTH' }, body: JSON.stringify(body) });
+            const none = toggleOff || effort === 'none';
+            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol'].includes(modelId);
+            assert.equal(response.status, unsupported ? 400 : 200, `${modelId} ${effort} ${path} toggleOff=${toggleOff}`);
+            const result = await response.text();
+            if (unsupported) {
+              assert.match(result, /does not support reasoning effort: none/);
+              assert.equal(calls.length, before);
+              continue;
+            }
+            assert.equal(calls.length, before + 1);
+            const wire = calls.at(-1)!;
+            const wireEffort = wireEfforts[none ? 0 : index];
+            assert.deepEqual(wire.output_config, wireEffort === null ? { format: body.output_config.format } : { effort: wireEffort, format: body.output_config.format });
+            assert.deepEqual(wire.thinking, none && modelId !== 'gpt-6-luna' ? { type: 'disabled' } : body.thinking);
+            assert.deepEqual(wire.messages, body.messages);
+            assert.deepEqual(wire.tools, body.tools);
+            assert.equal(wire.model, registry.get(modelId)!.model.upstream_model);
+          }
+        }
+      }
+    }
+  } finally { await close(proxy); }
 });
 
 test('SSE streams immediately with backpressure and cancels upstream on disconnect', async () => {

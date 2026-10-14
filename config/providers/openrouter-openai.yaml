@@ -16,12 +16,13 @@ models:
       window: 900000
       auto_compact_threshold: 800000
 
-    reasoning: &openai_reasoning
+    reasoning:
       mode: map
       source:
         effort: output_config.effort
         thinking: thinking
       mapping:
+        none: { action: error }
         low: low
         medium: medium
         high: high
@@ -38,4 +39,16 @@ models:
       window: 900000
       auto_compact_threshold: 800000
 
-    reasoning: *openai_reasoning
+    reasoning:
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        none: none
+        low: low
+        medium: medium
+        high: high
+        xhigh: xhigh
+        max: max
+      unsupported_level: error

@@ -5,11 +5,14 @@ import { parseDocument } from 'yaml';
 
 export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const NATIVE_AUTH_FEATURE = 'claude-native-auth';
+export const REASONING_FEATURE = 'reasoning-six-levels';
+export const REASONING_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type JsonObject = Record<string, unknown>;
+export type ReasoningTarget = string | { action: 'disable' | 'omit' | 'error' };
 export interface Reasoning {
   mode: 'observe' | 'map' | 'omit';
   source?: { effort: string; thinking?: string };
-  mapping?: Record<string, string>;
+  mapping?: Record<string, ReasoningTarget>;
   unsupported_level?: string;
 }
 export interface Model {
@@ -72,12 +75,19 @@ export function validateReasoning(value: unknown, location: string): asserts val
     return;
   }
   if (!isObject(value.mapping)) throw new ConfigError(`${location}: mapping must be an object`);
-  for (const level of ['low', 'medium', 'high', 'xhigh']) {
+  for (const level of REASONING_LEVELS) {
     if (!Object.hasOwn(value.mapping, level)) throw new ConfigError(`${location}.mapping: missing level ${level}`);
   }
   for (const [level, effort] of Object.entries(value.mapping)) {
-    if (!level.trim() || typeof effort !== 'string' || !effort.trim()) {
-      throw new ConfigError(`${location}.mapping.${level}: expected a non-empty string`);
+    if (!REASONING_LEVELS.some(known => known === level)) throw new ConfigError(`${location}.mapping: unknown level ${level}`);
+    if (isObject(effort)) {
+      fields(effort, { action: 'string' }, {}, `${location}.mapping.${level}`);
+      if (!['disable', 'omit', 'error'].includes(String(effort.action))) {
+        throw new ConfigError(`${location}.mapping.${level}: action must be disable, omit or error`);
+      }
+      if (effort.action === 'disable' && level !== 'none') throw new ConfigError(`${location}.mapping.${level}: disable is only valid for none`);
+    } else if (typeof effort !== 'string' || !effort.trim()) {
+      throw new ConfigError(`${location}.mapping.${level}: expected a non-empty string or action`);
     }
   }
 }

@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { isObject, NATIVE_AUTH_FEATURE } from './config.ts';
+import { isObject, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from './subagents.ts';
 
@@ -11,25 +11,39 @@ export class RouterError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 
+function omitEffort(payload: JsonObject): JsonObject {
+  if (isObject(payload.output_config)) {
+    const preserved = { ...payload.output_config };
+    delete preserved.effort;
+    if (Object.keys(preserved).length) payload.output_config = preserved;
+    else delete payload.output_config;
+  }
+  return payload;
+}
+
 export function applyReasoning(body: JsonObject, model: Model): JsonObject {
   const payload = { ...body };
   const reasoning = model.reasoning;
   if (!reasoning || reasoning.mode === 'observe') return payload;
   const output = body.output_config;
-  if (output == null) return payload;
-  if (!isObject(output)) throw new RouterError(400, 'output_config must be an object');
-  if (reasoning.mode === 'omit') {
-    const preserved = { ...output };
-    delete preserved.effort;
-    if (Object.keys(preserved).length) payload.output_config = preserved;
-    else delete payload.output_config;
-    return payload;
+  if (output != null && !isObject(output)) throw new RouterError(400, 'output_config must be an object');
+  if (reasoning.mode === 'omit') return omitEffort(payload);
+  const input = output?.effort;
+  if (input != null && typeof input !== 'string') throw new RouterError(400, 'output_config.effort must be a string');
+  if (typeof input === 'string' && !Object.hasOwn(reasoning.mapping ?? {}, input)) {
+    throw new RouterError(400, `No reasoning mapping for effort: ${input}`);
   }
-  if (output.effort == null) return payload;
-  if (typeof output.effort !== 'string') throw new RouterError(400, 'output_config.effort must be a string');
-  const effort = reasoning.mapping && Object.hasOwn(reasoning.mapping, output.effort) ? reasoning.mapping[output.effort] : undefined;
-  if (effort === undefined) throw new RouterError(400, `No reasoning mapping for effort: ${output.effort}`);
-  payload.output_config = { ...output, effort };
+  // Claude's thinking toggle can leave the previous effort in the request.
+  const level = isObject(body.thinking) && body.thinking.type === 'disabled' ? 'none' : input;
+  if (level == null) return payload;
+  const target = reasoning.mapping && Object.hasOwn(reasoning.mapping, level) ? reasoning.mapping[level] : undefined;
+  if (target === undefined) throw new RouterError(400, `No reasoning mapping for effort: ${level}`);
+  if (typeof target === 'string') payload.output_config = { ...output, effort: target };
+  else {
+    if (target.action === 'error') throw new RouterError(400, `Model ${model.id} does not support reasoning effort: ${level}`);
+    omitEffort(payload);
+    if (target.action === 'disable') payload.thinking = { type: 'disabled' };
+  }
   return payload;
 }
 
@@ -143,7 +157,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE, NATIVE_AUTH_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
+      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE, NATIVE_AUTH_FEATURE, REASONING_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
       return;
     }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
@@ -166,7 +180,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const entry = registry.get(model);
     if (!entry) throw new RouterError(400, 'Unknown model');
     const counting = url.pathname.endsWith('/count_tokens');
-    const payload = counting && entry.model.reasoning?.mode !== 'omit' ? { ...body } : applyReasoning(body, entry.model);
+    const payload = applyReasoning(body, entry.model);
     const headers = upstreamHeaders(incoming, entry.provider, environment);
     log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, auth: headers.has('x-api-key') ? 'api_key' : 'bearer', mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
     payload.model = entry.model.upstream_model;

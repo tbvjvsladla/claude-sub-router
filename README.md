@@ -310,6 +310,7 @@ reasoning:
     effort: output_config.effort
     thinking: thinking
   mapping:
+    none: { action: disable }
     low: low
     medium: high
     high: high
@@ -318,9 +319,59 @@ reasoning:
   unsupported_level: error
 ```
 
-지원하지 않는 effort나 `null` 매핑은 거부합니다. `observe`는 입력값을 바꾸지 않습니다.
-`omit`는 지원되지 않는 `output_config.effort`만 제거하고 `thinking`, 메시지, 도구,
-구조화 출력 형식은 보존합니다. 제거 후 빈 `output_config`는 전달하지 않습니다.
+공통 추론 강도는 GPT-6 Luna를 기준으로 `none`, `low`, `medium`, `high`, `xhigh`,
+`max`의 6단계입니다. `mode: map`은 이 여섯 키를 모두 명시해야 합니다.
+기존 5단계 사용자 프리셋에는 `none` 정책을 추가해야 하며, `max`도 필수입니다.
+실행 중인 구버전 라우터는 새 매핑을 처리하지 못하므로 재시작이 필요합니다.
+런처는 서버의 `reasoning-six-levels` 기능을 검사해 구버전 서버 재사용을 거부합니다.
+Provider의 실제 단계가 적으면 위 예시처럼 여러 공통 단계를 같은 값으로 매핑합니다.
+알 수 없는 공통 단계, `null` 매핑, 잘못된 action은 거부합니다.
+
+| 매핑 값 | upstream 처리 |
+| --- | --- |
+| 문자열 (`none`, `low`, `high` 등) | `output_config.effort`를 해당 값으로 변환 |
+| `{ action: disable }` | effort를 제거하고 `thinking`을 `{ type: disabled }`로 교체. `none`에만 사용 |
+| `{ action: omit }` | effort만 제거하고 기존 `thinking`은 보존 |
+| `{ action: error }` | 해당 모델의 지원 불가 요청으로 HTTP 400 반환 |
+
+`none`은 추론 끄기를 뜻하며 effort 생략과 다릅니다. 생략하면 Provider의 기본값이
+적용될 수 있습니다. `thinking.type: disabled` 입력도 `none`으로 정규화하며,
+이때 함께 남아 있는 이전 `high`·`max` 값보다 끄기 의도를 우선합니다.
+effort와 끄기 신호가 모두 없으면 Provider 기본 동작을 보존합니다.
+`disable`은 기존 thinking 예산·표시 옵션까지 제거해 모순된 설정을 보내지 않습니다.
+메시지의 과거 thinking 블록·서명, 도구, 구조화 출력 형식은 보존하고,
+effort 제거 후 빈 `output_config`는 전달하지 않습니다.
+메시지 생성과 토큰 계산 요청에 같은 변환·지원 여부 검사를 적용합니다.
+
+Claude Code 자체의 `/effort`·`--effort`는 여전히 `low`부터 `max`까지 5단계입니다.
+이 YAML은 Claude Code의 내장 선택기를 확장하지 않습니다. 추론을 끄려면
+Linux/Windows의 `Alt+T`, macOS의 `Option+T`로 thinking을 끄세요. 라우터는
+전달된 `thinking.type: disabled`를 해당 모델의 `none` 정책으로 처리합니다.
+API 클라이언트는 `output_config: { effort: none }`을 직접 보낼 수도 있습니다.
+[Claude Code 모델 설정](https://code.claude.com/docs/en/model-config),
+[Kimi의 Claude Code 추론 제어 안내](https://www.kimi.com/code/docs/en/third-party-tools/claude-code.html).
+
+기존 `mode: observe`는 입력을 그대로 전달하고, 단계 제어가 없는 Provider에 쓰는
+`mode: omit`는 모든 effort를 제거하면서 `thinking`을 보존합니다. 단계 조절 불가와
+추론 끄기 지원 여부가 서로 다르면 M3처럼 6단계 표에서 각 action을 지정하세요.
+
+| 모델 | `none` | `low` | `medium` | `high` | `xhigh` | `max` |
+| --- | --- | --- | --- | --- | --- | --- |
+| GPT-6 Luna | `none` | `low` | `medium` | `high` | `xhigh` | `max` |
+| GPT-6.1 Sol | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
+| Sonnet 5.5 | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
+| DeepSeek Pro / Flash | thinking 끄기 | `low` | `high` | `high` | `high` | `max` |
+| Kimi K3 | thinking 끄기¹ | `low` | `high` | `high` | `max` | `max` |
+| MiniMax M3 | thinking 끄기 | effort 제거 | effort 제거 | effort 제거 | effort 제거 | effort 제거 |
+
+¹ Kimi Coding은 thinking을 끄면 Provider 내부에서 K2.8 Preview의 비추론 모드로
+처리합니다. 라우터가 `upstream_model`을 바꾸는 것은 아닙니다.
+Sonnet 5.5의 `between_tools`는 도구 사이 thinking을 남기므로 완전한 `none`으로
+취급하지 않으며, 클라이언트가 명시하면 그대로 보존합니다.
+[DeepSeek 추론 제어](https://api-docs.deepseek.com/guides/thinking_mode/),
+[Kimi 모델별 effort·끄기 정책](https://www.kimi.com/code/docs/en/kimi-code/models.html),
+[Sonnet 5.5 thinking 변경 사항](https://platform.claude.com/docs/en/models/sonnet-5-5/migration-guide).
+
 `context.window`와 `context.auto_compact_threshold`는 모델별로 지정합니다.
 서드파티의 현재 자동 압축 설정은 800,000토큰이며 Sonnet에는 이를 강제하지 않습니다.
 설정이 실제 Provider의 최대 컨텍스트를 늘리는 것은 아닙니다.
@@ -336,8 +387,9 @@ MiniMax가 제시한 별도 권장값은 아닙니다.
 
 M3의 추론 제어는 `thinking`으로 보존합니다. 공식 Anthropic 호환 문서는 단계형
 `output_config.effort` 조절을 **M3.1 Flash Preview 전용**으로 명시하므로 M3에
-존재하지 않는 low/high 매핑을 만들지 않고 `reasoning.mode: omit`를 사용합니다.
-따라서 M3에서는 `/effort`를 바꿔도 upstream 추론 깊이가 조절된다고 보장하지 않습니다.
+존재하지 않는 low/high 매핑을 만들지 않습니다. 6단계 표에서 `none`은
+`action: disable`, 나머지 단계는 `action: omit`로 지정합니다. 따라서 M3에서는
+추론을 켜고 끌 수 있지만 `/effort`로 단계별 추론 깊이가 조절되지는 않습니다.
 M3.1로 모델을 임의 변경하지 않습니다.
 [MiniMax 공식 Anthropic API 문서](https://platform.minimax.io/docs/api-reference/text-anthropic-api),
 [M3 공식 모델 설명](https://github.com/MiniMax-AI/MiniMax-M3/blob/main/README.md).
@@ -362,11 +414,12 @@ OpenRouter 모델 ID가 아닙니다. 이 프로젝트에서는 요청한 900k�
 [GPT 6.1 Sol](https://openrouter.ai/openai/gpt-6.1-sol),
 [GPT 6 Luna](https://openrouter.ai/openai/gpt-6-luna).
 
-2026-10-08 공개 모델 메타데이터에서 두 모델 모두 `low`, `medium`, `high`, `xhigh`,
-`max`를 지원하므로 해당 다섯 단계를 각각 동일값으로 명시적으로 매핑합니다.
-Sol은 reasoning이 필수이고 Luna는 `none`도 지원하지만, 공통 Claude effort 매핑은
-reasoning을 임의로 끄지 않으며 알 수 없는 단계는 거부합니다. Anthropic 요청의
+GPT-6 Luna의 공식 6단계를 공통 기준으로 사용합니다. Luna는 `none`까지 동일값으로
+매핑하고, Sol은 추론이 필수이므로 `none: { action: error }`로 명시합니다.
+두 모델의 나머지 다섯 단계는 동일값으로 매핑합니다. Anthropic 요청의
 `output_config.effort`를 매핑하고 OpenRouter가 대상 모델의 reasoning 형식으로 변환합니다.
+[OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna),
+[OpenAI GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
 [공개 모델 메타데이터](https://openrouter.ai/api/v1/models),
 [reasoning 옵션 문서](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [Anthropic Messages API](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages).

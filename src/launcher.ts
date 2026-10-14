@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE } from './config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
 import { BASE_URL, context, findExecutable, run } from './platform.ts';
 import type { Context } from './platform.ts';
@@ -68,11 +68,12 @@ export async function assertRouterCompatibility(registry: Registry, policy: Mode
   const required = [];
   if (policy.compaction.model !== 'inherit') required.push(COMPACTION_POLICY_FEATURE);
   if ([...registry.values()].some(({ provider }) => provider.auth === 'claude_native')) required.push(NATIVE_AUTH_FEATURE);
+  if ([...registry.values()].some(({ model }) => model.reasoning?.mode === 'map')) required.push(REASONING_FEATURE);
   if (!required.length) return;
   const response = await fetcher(`${BASE_URL}/health`, { signal: AbortSignal.timeout(3000) });
   const health: unknown = await response.json();
   if (!response.ok || !isObject(health) || !Array.isArray(health.features) || required.some(feature => !(health.features as unknown[]).includes(feature))) {
-    throw new ConfigError('Running router does not support the required authentication or model policy; run npm run build and claude-sub-router restart');
+    throw new ConfigError('Running router does not support the required authentication, model or reasoning policy; run npm run build and claude-sub-router restart');
   }
 }
 

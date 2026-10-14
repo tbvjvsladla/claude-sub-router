@@ -21,6 +21,7 @@ models:
         effort: output_config.effort
         thinking: thinking
       mapping:
+        none: { action: disable }
         low: low
         medium: high
         high: high

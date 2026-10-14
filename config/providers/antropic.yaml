@@ -13,4 +13,16 @@ models:
     description: Claude Code login or Anthropic API key
     default: true
     reasoning:
-      mode: observe
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        # Sonnet 5.5 offers between_tools, but cannot fully disable thinking.
+        none: { action: error }
+        low: low
+        medium: medium
+        high: high
+        xhigh: xhigh
+        max: max
+      unsupported_level: error
