@@ -8,6 +8,25 @@ const provider = loadRegistry().get('deepseek-flash')!.provider;
 const definition = { name: 'mcp__docs__read', description: 'Read a document', input_schema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } };
 const addition = { type: 'tool_addition', tool: { type: 'tool_definition', definition } };
 
+test('OpenRouter omits the non-callable Claude deferred placeholder without changing real tools', () => {
+  const openrouter = loadRegistry().get('gpt-6-luna')!.provider;
+  const placeholder = { name: 'DeferredToolPlaceholder', description: 'Reserved placeholder that keeps deferred tool loading active; never call this tool.', input_schema: { type: 'object', properties: {} }, defer_loading: true };
+  const read = { name: 'Read', input_schema: { type: 'object', properties: { file_path: { type: 'string' } } } };
+  const body = { tools: [placeholder, read], messages: [{ role: 'user', content: 'Read a file' }] };
+  const original = structuredClone(body);
+  assert.deepEqual(applyInlineToolCompatibility(body, openrouter), { ...body, tools: [read] });
+  assert.deepEqual(body, original);
+  const deferred = { ...definition, defer_loading: true };
+  const search = { name: 'ToolSearch', input_schema: { type: 'object' } };
+  const discovered = { tools: [placeholder, search, deferred], messages: [{ role: 'system', content: [addition] }] };
+  assert.deepEqual(applyInlineToolCompatibility(discovered, openrouter), { ...discovered, tools: [search, deferred] });
+  for (const { provider: other } of loadRegistry().values()) {
+    if (other.id !== openrouter.id && !['kimi', 'deepseek'].includes(other.id)) assert.equal(applyInlineToolCompatibility(body, other), body);
+  }
+  const sameNameRealTool = { tools: [{ ...placeholder, input_schema: { type: 'object', properties: { value: { type: 'string' } } } }], messages: [] };
+  assert.equal(applyInlineToolCompatibility(sameNameRealTool, openrouter), sameNameRealTool);
+});
+
 test('inline client tools become deferred declarations and references at the same point in history', () => {
   const messages = [{ role: 'user', content: 'hello' }, { role: 'system', content: [{ type: 'text', text: 'New tools are available' }, addition] }];
   const body = { messages, metadata: { user_id: 'FAKE' } };

@@ -36,7 +36,7 @@ API 키를 쓰는 경우 Pro/Max 구독 가입은 필요하지 않습니다.
 Vast.ai 같은 root 컨테이너에서는 해당 root 계정으로 설치할 수 있습니다.
 
 ```bash
-cd claude-router
+cd claude-sub-router
 cp envs/.env.example envs/keys.env
 chmod 600 envs/keys.env   # 여러종류의 키가 있을 시 chmod 600 envs/*.env
 nano envs/keys.env
@@ -224,7 +224,8 @@ Sonnet의 `-p` 호출에 API 키를 전달합니다. `api_key_source`가 `provid
 `config/subagents.yaml`에서 세 기능의 모델을 독립적으로 선택합니다. 기본값은 모두
 `inherit`이며 Claude와 플러그인의 기존 모델 선택 규칙·환경변수를 유지합니다.
 메인 연결의 기본 Sonnet을 다른 기능의 공통 기본값으로 지정하지 않습니다.
-원하는 항목의 `model`만 **등록 모델 ID**로 바꾸세요. 파일 주석에 서드파티 6종과 키 이름이 있습니다.
+원하는 항목의 `model`만 **등록 모델 ID**로 바꾸세요. 등록 모델과 필요한 키 이름은
+`config/providers/*.yaml`에서 확인할 수 있습니다.
 
 ```yaml
 subagents:
@@ -298,7 +299,8 @@ CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub
 
 `config/providers/*.yaml`이 모델 목록·기본 모델·인증·reasoning 매핑의 원본입니다.
 `default: true`는 한 모델에만 지정합니다. `upstream_model`에는 Provider가 받는
-실제 모델 ID를 사용합니다. 기본값은 구독 Sonnet이며 서드파티는 API 키 인증입니다.
+실제 모델 ID를 사용합니다. 기본값은 Sonnet 5.5이며 기존 로그인 또는 Anthropic API 키를
+사용합니다. 서드파티 모델은 해당 Provider의 API 키 인증을 사용합니다.
 API 키는 기본적으로 `x-api-key` 헤더로 전송합니다. Bearer 인증 게이트웨이는
 `provider.api_key_header: authorization`을 지정하면 등록된 Provider 키로
 `Authorization: Bearer ...`를 만듭니다. Claude 구독 토큰을 대신 보내지 않습니다.
@@ -486,6 +488,9 @@ GPT-6 Luna의 공식 6단계를 공통 기준으로 사용합니다. Luna는 `no
 [reasoning 옵션 문서](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
 [Anthropic Messages API](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages).
 
+Claude Code가 보내는 비호출용 deferred placeholder는 OpenRouter 요청에서만 제거합니다.
+실제 도구와 ToolSearch는 유지하므로 도구 검색을 끄지 않고 최초 호출의 HTTP 400을 방지합니다.
+
 공유할 추가 Claude 설정은 `config/claude-settings.json`에 넣습니다.
 기존 로컬 `config/claude-test.json`이 있으면 이를 우선 사용하며 Git에는 포함하지 않습니다.
 모델 선택 목록은 실행할 때 생성하므로 별도 Python 동기화 명령은 필요하지 않습니다.
@@ -556,35 +561,61 @@ npm run test:cli -- --anthropic-auth
 키가 없으면 호출 전에 중단합니다. 실제 구독 한도/API 비용을 사용합니다.
 대화형은 `claude-sub`에서 키 승인·거절과 `/status`를 직접 확인하세요.
 
-2026-10-13에 Claude Code **2.1.296**으로 다음 실제 연결을 검증했습니다.
-
-| 호출 | 확인 결과 |
-| --- | --- |
-| `claude -p --model sonnet` | 기존 인증 환경에서 성공 |
-| `claude-sub -p --model claude-sonnet-5-5` | API 인증·HTTP 200 |
-| `claude-sub -p --model sonnet` | API 인증·HTTP 200 |
-| `claude-sub -p`(기본 Sonnet) | API 인증·HTTP 200 |
-
-자동 테스트 44개, 오프라인 CLI 인증 테스트, 타입 검사·빌드·배포 패키지 검증도
-통과했습니다. 대화형 승인 화면은 이 자동 검증에 포함하지 않았습니다.
-
 실제 **서브에이전트 호출** 검증도 API 비용을 사용하며 CI에서는 자동 실행하지 않습니다.
 
 ```bash
 npm run test:subagents
 npm run test:subagents -- kimi-k3 minimax-m3
+npm run test:subagents -- --policies-only
 SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 ```
 
 테스트 메인은 기본 `deepseek-flash`이며 프로젝트의 Sonnet 기본값은 변경하지 않습니다.
-각 실행에 임시 YAML을 지정하여 기본 실행은 서드파티 6종을 모두 검사합니다.
+각 실행에 세 정책 섹션이 있는 임시 YAML을 지정하여 기본 실행은 Sonnet을 포함한
+등록 모델 8종을 모두 검사합니다.
 충돌하는 `model: sonnet` 에이전트 정의를 강제로 덮어쓰고, 하위 Agent가 임시 파일의
 무작위 문자열을 **Read 도구로 읽고 반환**했는지 검사합니다. 부모의 파일 읽기는 실패로
 처리합니다. 스트림의 `parent_tool_use_id`, 하위 응답의 실제 모델, 라우터의 Provider
-요청·HTTP 200도 확인하므로 부모의 성공 주장만으로는 통과하지 않습니다.
-인수 없이 실행하면 기본값/정의 우선순위와 내장 Explore 강제 적용도 추가 검증합니다.
+요청·HTTP 200과 해당 Agent 호출에 연결된 결과 전달도 확인하므로 부모의 성공 주장만으로는
+통과하지 않습니다. 인수 없이 실행하면 메인 모델 상속, 기본값/정의 우선순위와 내장 Explore
+강제 적용도 추가 검증합니다. `--policies-only`는 이 네 정책 사례만 실행합니다.
 결과는 `artifacts/subagents-e2e.json`에 저장합니다. Claude가 출력한 비용은 추정치이며
 특히 `costBasis: unknown`인 커스텀 모델에서는 Provider의 실제 청구액과 다를 수 있습니다.
+
+### 최근 검증 결과
+
+2026-10-21에 Claude Code **2.1.305**, Node.js **24.15.0**, Linux/WSL2에서 확인했습니다.
+비대화형은 실제 Read 도구로 임의 토큰 파일을 읽고 반환하는 시나리오,
+대화형은 실제 PTY에서 Read·응답·키보드 후속 입력·응답·정상 종료하는 시나리오입니다.
+서브에이전트는 임시 YAML의 모델 선택과 실제 자식 모델·Read·부모에게 결과 전달을 확인했습니다.
+
+| 모델 ID | `claude-sub -p` | 대화형 `claude-sub` | 서브에이전트 모델 지정 |
+| --- | --- | --- | --- |
+| `claude-sonnet-5-5` | 통과 | 통과 | 통과 |
+| `deepseek-pro` | 통과 | 통과 | 통과 |
+| `deepseek-flash` | 통과 | 통과 | 통과 |
+| `kimi-k3` | 통과 | 통과 | 통과 |
+| `minimax-m3.1-flash` | 통과 | 통과 | 통과 |
+| `minimax-m3` | 통과 | 통과 | 통과 |
+| `gpt-6.1-sol` | 통과 | 통과 | 통과 |
+| `gpt-6-luna` | 통과 | 통과 | 통과 |
+
+Sonnet은 명시 ID·`sonnet` 별칭·모델 생략 기본값과 실제 대화형 모두 API 키 인증·HTTP 200을
+확인했습니다. 원본 `claude -p --model sonnet`도 기존 로그인으로 성공했습니다.
+자동 검사 **60/60**, 오프라인 CLI 인증 검사, 타입 검사와 빌드가 통과했습니다.
+
+YAML 정책은 상속·기본값·에이전트 정의 우선·내장 Explore 강제 적용의 실제 4사례와
+3개 기능 × 8개 모델의 설정 전달 24조합을 확인했습니다. 실제 `/compact`는 Sonnet 대화에서
+DeepSeek Flash로 압축한 뒤 Sonnet으로 후속 응답하는 사례가 통과했습니다.
+ToolSearch→MCP 호출은 Kimi K3·DeepSeek 2종·GPT 2종에서 통과했습니다.
+
+표는 수정 후 최종 시나리오 결과입니다. 초기 GPT 호출의 placeholder 관련 HTTP 400을
+수정하고 해당 모델을 재검증했으며, 대화형 시험의 입력 처리와 지시도 정리했습니다.
+24조합은 설정 전달 검사이며 기능별 실제 LLM 호출 24회를 뜻하지 않습니다.
+Ouroboros는 모델 설정 전달까지 확인했고 별도 LLM 실행은 포함하지 않았습니다.
+모든 플러그인·effort 조합·장시간 안정성은 이번 검증 범위에 포함하지 않았습니다.
+
+### 벤치마크
 
 ```bash
 npm run benchmark

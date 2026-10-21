@@ -11,8 +11,10 @@ import { routerReport } from '../dist/service.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const registry = loadRegistry();
 const parentModel = process.env.SUBAGENT_TEST_MAIN_MODEL || 'deepseek-flash';
-const requested = process.argv.slice(2);
-const models = requested.length ? requested : [...registry].filter(([, entry]) => (entry.provider.auth ?? 'api_key') === 'api_key').map(([id]) => id);
+const policyOnly = process.argv.includes('--policies-only');
+const requested = process.argv.slice(2).filter(arg => arg !== '--policies-only');
+if (policyOnly && requested.length) throw new Error('--policies-only does not accept model IDs');
+const models = policyOnly ? [] : requested.length ? requested : [...registry].map(([id]) => id);
 for (const model of [parentModel, ...models]) if (!registry.has(model)) throw new Error(`Unknown registered model: ${model}`);
 const directory = mkdtempSync(join(tmpdir(), 'claude-sub-agent-e2e-'));
 const artifact = join(root, 'artifacts/subagents-e2e.json');
@@ -61,6 +63,7 @@ async function invoke(args, environment) {
 const cases = models.map(model => ({ name: 'force_over_definition', model, force: true, definitionModel: 'sonnet', expected: model, agentType: 'router-probe' }));
 if (!requested.length) {
   cases.push(
+    { name: 'inherit_main_model', model: 'inherit', force: false, expected: parentModel, agentType: 'router-probe' },
     { name: 'default_without_definition', model: 'gpt-6.1-sol', force: false, expected: 'gpt-6.1-sol', agentType: 'router-probe' },
     { name: 'definition_over_default', model: 'gpt-6.1-sol', force: false, definitionModel: 'deepseek-flash', expected: 'deepseek-flash', agentType: 'router-probe' },
     { name: 'force_builtin_explore', model: 'gpt-6.1-sol', force: true, expected: 'gpt-6.1-sol', agentType: 'Explore' },
@@ -73,7 +76,7 @@ try {
     const challenge = join(directory, 'challenge.txt');
     const config = join(directory, 'subagents.yaml');
     writeFileSync(challenge, `${token}\n`);
-    writeFileSync(config, `model: ${scenario.model}\nforce: ${scenario.force}\n`);
+    writeFileSync(config, `subagents:\n  model: ${scenario.model}\n  force: ${scenario.force}\ncompaction:\n  model: inherit\nouroboros:\n  model: inherit\n`);
     const worker = { description: 'Mandatory file reading test worker', prompt: 'Use Read to read challenge.txt in your current directory. Return its complete contents. Do not guess. Do not spawn other agents.', tools: ['Read'], maxTurns: 5 };
     if (scenario.definitionModel) worker.model = scenario.definitionModel;
     const args = ['-p', `Invoke the ${scenario.agentType} subagent once to read ${challenge} and return its exact contents. Do not read the file yourself. Wait for the agent to finish, then return its result. Do not use fork, isolation, or other agents.`,
@@ -99,7 +102,13 @@ try {
     const reads = childMessages.flatMap(event => event.message?.content ?? []).filter(block => block.type === 'tool_use' && block.name === 'Read' && block.input?.file_path === challenge);
     const readIDs = new Set(reads.map(read => read.id));
     const readResult = children.some(event => (event.message?.content ?? []).some(block => block.type === 'tool_result' && readIDs.has(block.tool_use_id) && !block.is_error && textContent(block.content).includes(token)));
-    const childReturned = childMessages.some(event => (event.message?.content ?? []).some(block => block.type === 'text' ? block.text?.includes(token) : block.name === 'SubagentHandback' && block.input?.message?.includes(token)));
+    // Newer Claude versions can finish a child through an internal handback
+    // without emitting its final text as a child assistant event. The Agent
+    // tool_result, bound to that invocation, is the delivery to the parent.
+    const delivered = events.some(event => event.type === 'user' && !event.parent_tool_use_id &&
+      Array.isArray(event.message?.content) && event.message.content.some(block =>
+        block.type === 'tool_result' && callIDs.has(block.tool_use_id) && !block.is_error && textContent(block.content).includes(token)));
+    const childReturned = delivered || childMessages.some(event => (event.message?.content ?? []).some(block => block.type === 'text' ? block.text?.includes(token) : block.name === 'SubagentHandback' && block.input?.message?.includes(token)));
     const childModels = [...new Set(childMessages.map(event => event.message?.model).filter(model => model && model !== '<synthetic>'))];
     const parentRead = main.some(event => event.message?.content?.some(block => block.type === 'tool_use' && block.name === 'Read'));
     const result = events.findLast(event => event.type === 'result');
@@ -108,11 +117,18 @@ try {
       delegated: calls.length === 1,
       child_model: childModels.length > 0 && childModels.every(model => matchesModel(model, scenario.expected)),
       child_read_succeeded: readResult, child_returned_token: childReturned, parent_did_not_read: !parentRead,
+      child_result_delivered: delivered,
       parent_received_token: result?.result?.includes(token) === true,
       provider_request: routed.some(event => event.event === 'REQUEST'), provider_success: routed.some(event => event.event === 'UPSTREAM_STATUS' && event.status === 200),
+      no_upstream_errors: routed.filter(event => event.event === 'UPSTREAM_STATUS').every(event => event.status === 200),
     };
     const passed = code === 0 && !timedOut && !result?.is_error && Object.values(checks).every(Boolean);
     const entry = { name: scenario.name, configured_model: scenario.model, force: scenario.force, definition_model: scenario.definitionModel ?? null, expected_child_model: scenario.expected, observed_child_models: childModels, passed, checks, exit_code: code, timed_out: timedOut, duration_ms: Math.round(performance.now() - started), cli_estimated_cost_usd: result?.total_cost_usd ?? null, cost_basis: result?.modelUsage ?? {}, errors: [...new Set(events.map(event => event.error).filter(Boolean))] };
+    if (!passed) {
+      entry.diagnostic = { result: result?.result, result_subtype: result?.subtype,
+        agent_calls: calls.map(call => ({ id: call.id, input: call.input })),
+        child_types: [...new Set(children.map(event => event.type))], routed };
+    }
     report.cases.push(entry); save(); console.log(JSON.stringify(entry));
   }
 } finally { report.finished_at = new Date().toISOString(); save(); rmSync(directory, { recursive: true, force: true }); }

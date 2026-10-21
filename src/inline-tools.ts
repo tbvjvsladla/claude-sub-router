@@ -67,6 +67,18 @@ function flattenKimiTools(body: JsonObject): JsonObject {
 }
 
 export function applyInlineToolCompatibility(body: JsonObject, provider: Provider): JsonObject {
+  if (provider.id === 'openrouter-openai' && Array.isArray(body.tools)) {
+    // Claude reserves this non-callable sentinel even when no tool search is
+    // enabled. OpenRouter treats it as a real deferred tool and rejects the
+    // request without a search tool. Keep real deferred tools and search intact.
+    const tools = body.tools.filter(tool => !(isObject(tool) && tool.name === 'DeferredToolPlaceholder' &&
+      tool.defer_loading === true &&
+      tool.description === 'Reserved placeholder that keeps deferred tool loading active; never call this tool.' &&
+      isObject(tool.input_schema) && tool.input_schema.type === 'object' &&
+      isObject(tool.input_schema.properties) && Object.keys(tool.input_schema.properties).length === 0 &&
+      (!Array.isArray(tool.input_schema.required) || tool.input_schema.required.length === 0)));
+    return tools.length === body.tools.length ? body : { ...body, tools };
+  }
   if (provider.id === 'kimi') return flattenKimiTools(body);
   if (provider.id !== 'deepseek' || !Array.isArray(body.messages) || (body.tools !== undefined && !Array.isArray(body.tools))) return body;
   const tools = Array.isArray(body.tools) ? [...body.tools] : [];
