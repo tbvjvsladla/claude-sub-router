@@ -30,9 +30,10 @@ models:
       unsupported_level: error
 
   - id: deepseek-flash
+    # The stable alias is served by DeepSeek-V4.1-Flash-1017.
     upstream_model: deepseek-flash
-    display_name: DeepSeek Flash
-    description: DeepSeek API · Flash
+    display_name: DeepSeek V4.1 Flash 1017
+    description: DeepSeek API · V4.1 Flash 1017 · 1M Context
 
     context:
       window: 1000000

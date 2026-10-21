@@ -53,6 +53,20 @@ test('OpenRouter GPT models share positive efforts but declare different none su
   for (const id of ['deepseek-pro', 'deepseek-flash', 'kimi-k3']) assert.deepEqual(registry.get(id)?.model.reasoning?.mapping?.none, { action: 'disable' });
 });
 
+test('MiniMax M3.1 Flash maps positive efforts and rejects thinking off before sending upstream', () => {
+  const { provider, model } = loadRegistry().get('minimax-m3.1-flash')!;
+  assert.equal(provider.base_url, 'https://api.minimax.io/anthropic');
+  assert.equal(provider.api_key_env, 'MINIMAX_API_KEY');
+  assert.equal(model.upstream_model, 'MiniMax-M3.1-Flash');
+  assert.deepEqual(model.context, { window: 1000000, auto_compact_threshold: 800000 });
+  for (const effort of ['low', 'medium', 'high', 'xhigh', 'max']) {
+    const body = { output_config: { effort }, thinking: { type: 'adaptive' } };
+    assert.deepEqual(applyReasoning(body, model), body);
+    assert.throws(() => applyReasoning({ ...body, thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
+  }
+  assert.throws(() => applyReasoning({ output_config: { effort: 'none' } }, model), /does not support reasoning effort: none/);
+});
+
 test('registry rejects duplicates, unknown fields and invalid types', () => {
   for (const modify of [
     (value: ReturnType<typeof fixture>) => value.models.push(value.models[0]!),
@@ -151,7 +165,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5'].includes(model.id);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);

@@ -4,7 +4,9 @@ provider:
   name: Kimi
   protocol: anthropic
 
-  # Kimi 공식 Anthropic 호환 API 주소로 변경
+  # Kimi Code subscription endpoint; use a key from the Kimi Code Console,
+  # not the separate Moonshot/Kimi Open Platform (the env name is historical).
+  # Overseas accounts may use https://api.kimi.ai/coding/ instead.
   base_url: https://api.kimi.com/coding/
   api_key_env: MOONSHOT_API_KEY
 

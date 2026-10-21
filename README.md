@@ -1,7 +1,7 @@
 # claude-sub
 
 기존 `claude` 명령의 로그인·플러그인·대화 기록을 공유하면서 `claude-sub`에서
-Sonnet(기존 로그인 또는 Anthropic API)·DeepSeek·Kimi·MiniMax M3·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
+Sonnet(기존 로그인 또는 Anthropic API)·DeepSeek·Kimi·MiniMax M3/M3.1 Flash·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
@@ -47,7 +47,7 @@ claude-sub
 
 `envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`,
 `OPENROUTER_API_KEY`, 선택 항목인 `ANTHROPIC_API_KEY` 칸이 있습니다.
-MiniMax M3는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
+MiniMax M3와 M3.1 Flash는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
 기존 사용자는 키 파일을 다시 만들 필요가 없습니다. 기본 설치는 `envs/*.env`를 모두
@@ -363,6 +363,7 @@ API 클라이언트는 `output_config: { effort: none }`을 직접 보낼 수도
 | DeepSeek Pro / Flash | thinking 끄기 | `low` | `high` | `high` | `high` | `max` |
 | Kimi K3 | thinking 끄기¹ | `low` | `high` | `high` | `max` | `max` |
 | MiniMax M3 | thinking 끄기 | effort 제거 | effort 제거 | effort 제거 | effort 제거 | effort 제거 |
+| MiniMax M3.1 Flash | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 
 ¹ Kimi Coding은 thinking을 끄면 Provider 내부에서 K2.8 Preview의 비추론 모드로
 처리합니다. 라우터가 `upstream_model`을 바꾸는 것은 아닙니다.
@@ -379,18 +380,59 @@ Claude Code의 최대 컨텍스트 환경변수는 안전을 위해 등록된 �
 `context.window` 중 최솟값을 공통 상한으로 사용합니다(현재 900,000토큰).
 자동 압축 설정은 각 모델의 `auto_compact_threshold`에서 별도로 생성합니다.
 
-### MiniMax M3
+### Kimi Code와 DeepSeek Flash 연결 점검
+
+Kimi의 `MOONSHOT_API_KEY`는 기존 변수명이며, 값은 반드시
+[Kimi Code Console](https://www.kimi.com/code/console)의 **구독용 API 키**여야 합니다.
+Moonshot/Kimi Open Platform 키는 Kimi Code와 호환되지 않습니다. 기본 주소는
+`https://api.kimi.com/coding/`이며 해외 계정용 공식 주소는
+`https://api.kimi.ai/coding/`입니다. 계정에 맞게 `config/providers/kimi.yaml`에서 변경하세요.
+
+`kimi-k3`는 `k3`를 호출합니다. Plus/Moderato는 K3 256K, Pro/Allegretto 이상은
+K3 1M을 지원합니다. Plus/Moderato에서는 `context.window`를 `262144`,
+`auto_compact_threshold`를 그보다 작은 값(예: `200000`)으로 설정하세요.
+K3 권한이 없는 기존 Andante 요금제는 `upstream_model: kimi-for-coding`이 필요합니다.
+현재 기본 Kimi 설정은 K3 1M 권한이 있는 요금제를 전제로 합니다.
+[공식 모델·주소·요금제 안내](https://www.kimi.com/code/docs/en/kimi-code/models.html),
+[인증·권한·사용량 오류 안내](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html).
+
+DeepSeek V4.1 Flash 1017의 공식 호출 ID는 **`deepseek-flash`**입니다.
+`deepseek-v4.1-flash-1017` 같은 버전명을 임의로 보내지 않습니다.
+기존 `deepseek-flash` 항목으로 최신 모델을 사용할 수 있습니다.
+[DeepSeek 공식 호출 ID 안내](https://api-docs.deepseek.com/).
+
+설정을 바꾼 뒤에는 다음 명령으로 실행 중인 라우터에도 반영하세요.
+`Router models differ from YAML`은 재시작 전 모델 목록이 남아 있다는 뜻입니다.
+
+```bash
+npm run build
+claude-sub-router restart
+claude-sub --model kimi-k3 -p 'Reply with exactly OK.' --effort low
+claude-sub --model deepseek-flash -p 'Reply with exactly OK.' --effort low
+```
+
+### MiniMax M3와 M3.1 Flash
+
+신규 `minimax-m3.1-flash`는 공식 API의 **`MiniMax-M3.1-Flash`**로 연결합니다.
+컨텍스트는 1,000,000토큰, 자동 압축은 800,000토큰입니다.
+Claude Code에서 선택한 `low`, `medium`, `high`, `xhigh`, `max`를
+Provider의 같은 단계로 자동 매핑합니다. 실행할 때 `--effort`를 따로 지정할 필요는 없습니다.
+API 요청에 effort 자체가 없으면 Provider 기본값 `max`가 적용됩니다.
+이 모델은 추론이 필수이므로 thinking 끄기 또는 `none`은 로컬에서 HTTP 400으로 거부합니다.
+
+```bash
+claude-sub --model minimax-m3.1-flash
+```
 
 `minimax-m3`는 공식 API의 `MiniMax-M3`로 연결합니다. 컨텍스트는 공식 문서의
 1,000,000토큰을 사용하며, 자동 압축 800,000토큰은 **이 프로젝트의 운영 정책**이지
 MiniMax가 제시한 별도 권장값은 아닙니다.
 
 M3의 추론 제어는 `thinking`으로 보존합니다. 공식 Anthropic 호환 문서는 단계형
-`output_config.effort` 조절을 **M3.1 Flash Preview 전용**으로 명시하므로 M3에
+`output_config.effort` 조절을 **M3.1 Flash 전용**으로 명시하므로 M3에
 존재하지 않는 low/high 매핑을 만들지 않습니다. 6단계 표에서 `none`은
 `action: disable`, 나머지 단계는 `action: omit`로 지정합니다. 따라서 M3에서는
 추론을 켜고 끌 수 있지만 `/effort`로 단계별 추론 깊이가 조절되지는 않습니다.
-M3.1로 모델을 임의 변경하지 않습니다.
 [MiniMax 공식 Anthropic API 문서](https://platform.minimax.io/docs/api-reference/text-anthropic-api),
 [M3 공식 모델 설명](https://github.com/MiniMax-AI/MiniMax-M3/blob/main/README.md).
 
