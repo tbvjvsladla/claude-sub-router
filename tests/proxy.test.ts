@@ -172,6 +172,42 @@ test('Artifact schemas work for DeepSeek Flash and Pro after switching models, i
   } finally { await close(proxy); }
 });
 
+test('DeepSeek inline tool additions use normalized deferred tools and legacy references, including compaction', async () => {
+  const registry = loadRegistry();
+  const calls: JsonObject[] = [];
+  const environment: NodeJS.ProcessEnv = { DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK', MOONSHOT_API_KEY: 'FAKE_KIMI' };
+  const proxy = createRouterServer(registry, { environment, fetch: async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return Response.json({ type: 'message' });
+  } });
+  const base = await listen(proxy);
+  const definition = { name: 'mcp__docs__read', input_schema: { type: 'object', properties: { path: { type: 'string', pattern: String.raw`^[^\0]*$` } } } };
+  const messages = [{ role: 'user', content: 'hello' }, { role: 'system', content: [{ type: 'text', text: 'New tools' }, { type: 'tool_addition', tool: { type: 'tool_definition', definition } }] }];
+  const original = structuredClone(messages);
+  try {
+    for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+      for (const model of ['deepseek-flash', 'deepseek-pro', 'kimi-k3']) {
+        for (const compaction of [false, true]) {
+          const headers: Record<string, string> = compaction ? { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-request-class': 'compaction' } : {};
+          const response = await fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify({ model, messages, stream: true, output_config: { effort: 'xhigh' } }) });
+          assert.equal(response.status, 200);
+          await response.text();
+          const wire = calls.at(-1)!;
+          if (model === 'kimi-k3' && !compaction) {
+            assert.deepEqual(wire.messages, messages);
+            assert.equal(wire.tools, undefined);
+          } else {
+            const normalizedDefinition = { ...definition, defer_loading: true, input_schema: { ...definition.input_schema, properties: { path: { type: 'string', pattern: String.raw`^[^\u0000]*$` } } } };
+            assert.deepEqual(wire.tools, [normalizedDefinition]);
+            assert.deepEqual(wire.messages, [messages[0], { role: 'system', content: [messages[1]!.content[0], { type: 'tool_addition', tool: { type: 'tool_reference', name: definition.name } }] }]);
+          }
+        }
+      }
+    }
+    assert.deepEqual(messages, original);
+  } finally { await close(proxy); }
+});
+
 test('real loopback HTTP preserves routing, auth, JSON, SSE, gzip and provider errors for every model', async () => {
   const registry = loadRegistry();
   const calls: { headers: Record<string, unknown>; body: Record<string, unknown>; url: string }[] = [];
