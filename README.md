@@ -603,6 +603,7 @@ npm run benchmark
 | `.github/workflows/` | 포함 | CI와 GitHub Release 자동화 설정. 런타임 배포 파일과 Docker 빌드 컨텍스트에서는 제외 |
 | `src/`, `config/providers/`, `scripts/`, `tests/`, 패키지·설치 설정 | 포함 | 소스·공유 설정·빌드·검증에 필요. 런타임에 필요한 파일만 배포 허용 목록에 포함 |
 | `.serena/`, `.claude/`, `.claude-sub/`, `.codex/`, `.agents/` | 제외 | 로컬 개발 도구의 설정·캐시·작업 데이터 |
+| `temp/` | 제외 | PC 이식용 대화 기록과 로컬 인수인계 패키지 |
 | `node_modules/`, `dist/`, `artifacts/`, `coverage/` | 제외 | 의존성과 생성 결과. 배포 압축 파일은 GitHub Release 자산으로 게시 |
 | 실제 `.env`·`envs/` 키 파일 | 제외 | 각 실행 환경에서 별도 관리. 값이 비어 있는 `envs/.env.example`만 공유 |
 
