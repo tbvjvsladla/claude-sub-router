@@ -401,6 +401,12 @@ DeepSeek V4.1 Flash 1017의 공식 호출 ID는 **`deepseek-flash`**입니다.
 기존 `deepseek-flash` 항목으로 최신 모델을 사용할 수 있습니다.
 [DeepSeek 공식 호출 ID 안내](https://api-docs.deepseek.com/).
 
+Claude Code의 대화형 세션에서는 `Artifact` 도구의 `pattern: "^[^\\0]*$"`를
+DeepSeek 스키마 검증기가 거부할 수 있습니다. 라우터는 DeepSeek Flash/Pro로 보낼 때
+도구 입력 스키마의 NUL 이스케이프 `\0`를 같은 의미의 `\u0000`으로 자동 변환합니다.
+중첩 스키마와 토큰 계산·압축 요청에도 적용합니다. 메시지·예제·상수의 문자열과
+다른 Provider로 보내는 스키마는 그대로 보존합니다.
+
 설정을 바꾼 뒤에는 다음 명령으로 실행 중인 라우터에도 반영하세요.
 `Router models differ from YAML`은 재시작 전 모델 목록이 남아 있다는 뜻입니다.
 

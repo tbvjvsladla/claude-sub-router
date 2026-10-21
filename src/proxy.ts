@@ -5,6 +5,7 @@ import { pipeline } from 'node:stream/promises';
 import { isObject, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from './subagents.ts';
+import { applyToolSchemaCompatibility } from './tool-schemas.ts';
 
 export class RouterError extends Error {
   status: number;
@@ -180,7 +181,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const entry = registry.get(model);
     if (!entry) throw new RouterError(400, 'Unknown model');
     const counting = url.pathname.endsWith('/count_tokens');
-    const payload = applyReasoning(body, entry.model);
+    const payload = applyToolSchemaCompatibility(applyReasoning(body, entry.model), entry.provider);
     const headers = upstreamHeaders(incoming, entry.provider, environment);
     log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, auth: headers.has('x-api-key') ? 'api_key' : 'bearer', mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
     payload.model = entry.model.upstream_model;

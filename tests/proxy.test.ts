@@ -112,7 +112,9 @@ test('compaction policy is isolated per client and official request class; other
       assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-request-class': 'compaction', 'x-claude-code-compaction': trigger, authorization: 'Bearer FAKE_OAUTH' })).status, 200);
       const call = calls.at(-1)!;
       assert.equal(call.body.model, 'deepseek-flash');
-      assert.deepEqual({ ...call.body, model: 'kimi-k3' }, original);
+      assert.deepEqual({ ...call.body, model: 'kimi-k3', tools: original.tools }, original);
+      const tools = call.body.tools as { input_schema: { properties: { value: { pattern: string } } } }[];
+      assert.equal(tools[0]!.input_schema.properties.value.pattern, String.raw`^[^\u0000]*$`);
       assert.equal(call.headers.get('authorization'), null);
       assert.equal(call.headers.get('x-api-key'), 'FAKE_DEEPSEEK');
       assert.equal(call.headers.get(COMPACTION_MODEL_HEADER), null);
@@ -135,6 +137,38 @@ test('compaction policy is isolated per client and official request class; other
     assert.equal(calls.length, count + 1);
     assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
     assert.deepEqual(body, original);
+  } finally { await close(proxy); }
+});
+
+test('Artifact schemas work for DeepSeek Flash and Pro after switching models, including streaming and token counts', async () => {
+  const registry = loadRegistry();
+  const calls: JsonObject[] = [];
+  const environment: NodeJS.ProcessEnv = {};
+  for (const { provider } of registry.values()) if (provider.api_key_env) environment[provider.api_key_env] = 'FAKE_PROVIDER_KEY';
+  const proxy = createRouterServer(registry, { environment, fetch: async (_input, init) => {
+    calls.push(JSON.parse(String(init?.body)));
+    return new Response('event: message_stop\ndata: {"type":"message_stop"}\n\n', { headers: { 'content-type': 'text/event-stream' } });
+  } });
+  const base = await listen(proxy);
+  const originalPattern = String.raw`^[^\0]*$`;
+  const compatiblePattern = String.raw`^[^\u0000]*$`;
+  const schema = { type: 'object', properties: { path: { type: 'string', pattern: originalPattern }, literal: { const: { pattern: originalPattern } } }, required: ['path'] };
+  const originalSchema = structuredClone(schema);
+  const messages = [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE_THINKING', signature: 'FAKE_SIGNATURE' }] }, { role: 'user', content: originalPattern }];
+  try {
+    for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+      for (const model of ['kimi-k3', 'deepseek-flash', 'minimax-m3.1-flash', 'deepseek-pro', 'claude-sonnet-5-5']) {
+        const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_NATIVE_TOKEN' }, body: JSON.stringify({ model, stream: true, thinking: { type: 'adaptive' }, output_config: { effort: 'xhigh' }, tools: [{ name: 'Artifact', input_schema: schema }], messages }) });
+        assert.equal(response.status, 200);
+        assert.match(await response.text(), /message_stop/);
+        const wire = calls.at(-1)!;
+        const expectedSchema = model.startsWith('deepseek-') ? { ...originalSchema, properties: { ...originalSchema.properties, path: { ...originalSchema.properties.path, pattern: compatiblePattern } } } : originalSchema;
+        assert.deepEqual(wire.tools, [{ name: 'Artifact', input_schema: expectedSchema }]);
+        assert.deepEqual(wire.messages, messages);
+        assert.equal(wire.model, registry.get(model)!.model.upstream_model);
+      }
+    }
+    assert.deepEqual(schema, originalSchema);
   } finally { await close(proxy); }
 });
 
