@@ -596,6 +596,21 @@ npm run benchmark
 
 ## Git 및 배포
 
+소스 저장소에 보관하는 파일과 실행 환경에 배포하는 파일은 구분합니다.
+
+| 경로 | Git 관리 | 용도 및 배포 정책 |
+| --- | --- | --- |
+| `.github/workflows/` | 포함 | CI와 GitHub Release 자동화 설정. 런타임 배포 파일과 Docker 빌드 컨텍스트에서는 제외 |
+| `src/`, `config/providers/`, `scripts/`, `tests/`, 패키지·설치 설정 | 포함 | 소스·공유 설정·빌드·검증에 필요. 런타임에 필요한 파일만 배포 허용 목록에 포함 |
+| `.serena/`, `.claude/`, `.claude-sub/`, `.codex/`, `.agents/` | 제외 | 로컬 개발 도구의 설정·캐시·작업 데이터 |
+| `node_modules/`, `dist/`, `artifacts/`, `coverage/` | 제외 | 의존성과 생성 결과. 배포 압축 파일은 GitHub Release 자산으로 게시 |
+| 실제 `.env`·`envs/` 키 파일 | 제외 | 각 실행 환경에서 별도 관리. 값이 비어 있는 `envs/.env.example`만 공유 |
+
+Serena의 `project.yml`은 팀 설정으로 공유할 수도 있지만, 이 프로젝트에서는 `.serena/`
+전체를 로컬 도구 설정으로 취급합니다. 빌드·CI·라우터 실행에는 사용하지 않습니다.
+`.gitignore`는 Git 추가 대상을, `.dockerignore`는 Docker 빌드 컨텍스트를 제어하며,
+배포 압축 파일의 내용은 `scripts/package-release.mjs`의 허용 목록으로 별도 관리합니다.
+
 ```bash
 npm run check:secrets
 npm run package:release
@@ -616,6 +631,7 @@ GitHub Actions는 Node 22/24에서 타입 검사·오프라인 테스트·비밀
 검증합니다. `package.json` 버전과 일치하는 `v0.1.0` 형식의 태그를 올리면 GitHub Release를
 생성합니다. 실제 API 테스트는 CI에서 자동 실행하지 않습니다. npm 공개 배포는
 `private: true`로 차단하며, 공개 라이선스 정책은 아직 정하지 않았습니다.
+현재 워크플로에는 Vast.ai 서버를 자동으로 갱신하거나 재시작하는 배포 단계는 없습니다.
 
 ### 선택 사항: Docker
 

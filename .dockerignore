@@ -1,4 +1,5 @@
 .git
+.github
 node_modules
 dist
 artifacts
@@ -19,4 +20,5 @@ config/claude-test.json
 .codex
 .agents
 .aws
+.serena
 *_progress.md
