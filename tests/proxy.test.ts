@@ -172,7 +172,7 @@ test('Artifact schemas work for DeepSeek Flash and Pro after switching models, i
   } finally { await close(proxy); }
 });
 
-test('DeepSeek inline tool additions use normalized deferred tools and legacy references, including compaction', async () => {
+test('inline tool additions use each provider format, including compaction and token counts', async () => {
   const registry = loadRegistry();
   const calls: JsonObject[] = [];
   const environment: NodeJS.ProcessEnv = { DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK', MOONSHOT_API_KEY: 'FAKE_KIMI' };
@@ -194,8 +194,8 @@ test('DeepSeek inline tool additions use normalized deferred tools and legacy re
           await response.text();
           const wire = calls.at(-1)!;
           if (model === 'kimi-k3' && !compaction) {
-            assert.deepEqual(wire.messages, messages);
-            assert.equal(wire.tools, undefined);
+            assert.deepEqual(wire.messages, [messages[0], { role: 'system', content: [messages[1]!.content[0]] }]);
+            assert.deepEqual(wire.tools, [definition]);
           } else {
             const normalizedDefinition = { ...definition, defer_loading: true, input_schema: { ...definition.input_schema, properties: { path: { type: 'string', pattern: String.raw`^[^\u0000]*$` } } } };
             assert.deepEqual(wire.tools, [normalizedDefinition]);

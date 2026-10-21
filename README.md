@@ -413,6 +413,14 @@ Claude Code가 메시지 안에서 추가한 도구 정의를 DeepSeek가 지원
 전달해 추가·제거 시점을 유지합니다. 같은 이름의 도구를 재정의하면 최신 정의를
 사용합니다. 이 변환도 DeepSeek 요청에만 적용하며 기존 대화 기록 파일은 수정하지 않습니다.
 
+Kimi는 `tool_definition`뿐 아니라 메시지 안의 `tool_addition` 이름 참조도 거부합니다.
+라우터는 Kimi 요청의 추가·제거 기록을 처리해 **현재 로드된 도구만** 일반 `tools`
+목록으로 전달합니다. Claude Code의 `ToolSearch`와 MCP 검색·호출은 계속 동작하며,
+검색되지 않은 지연 로딩 도구는 미리 전달하지 않습니다. `ENABLE_TOOL_SEARCH=false` 설정은
+필요하지 않습니다. 검색 결과의 `tool_reference`도 해당 도구 선언과 텍스트 결과로 변환합니다.
+새 도구를 로드하면 `tools` 목록이 바뀌므로 Provider의 프롬프트 캐시가
+다시 계산될 수 있습니다. 이 변환은 요청에만 적용하며 사용자 설정과 대화 기록은 보존합니다.
+
 설정을 바꾼 뒤에는 다음 명령으로 실행 중인 라우터에도 반영하세요.
 `Router models differ from YAML`은 재시작 전 모델 목록이 남아 있다는 뜻입니다.
 
@@ -518,6 +526,19 @@ node scripts/test-cli.mjs deepseek-flash
 기본 실행은 원본 Sonnet 및 라우터의 모든 모델을 검사하며, 모델 인수는 해당
 `claude-sub` 모델만 검사합니다. 응답 본문·키를 제외한 요약만
 `artifacts/cli-e2e.json`에 저장합니다. 이 디렉터리는 배포하지 않습니다.
+
+도구 검색을 켠 실제 MCP 흐름도 별도로 검증할 수 있습니다(API 비용 사용).
+
+```bash
+npm run build
+npm run test:tool-search -- kimi-k3 deepseek-flash
+```
+
+이 테스트는 임시 로컬 MCP 서버와 `ENABLE_TOOL_SEARCH=true`를 사용합니다.
+`ToolSearch`로 도구를 검색하고 실제로 호출한 뒤, 서버가 반환한 무작위 토큰으로 최종
+응답하는지 확인합니다. 검색하지 않은 도구가 upstream에 로드되거나 중간에 HTTP 400/422가
+발생하면 실패합니다. 따라서 CLI의 자동 재시도로 오류가 가려진 경우도 통과하지 않습니다.
+요약은 `artifacts/tool-search-e2e.json`에 저장합니다.
 
 Anthropic 인증을 실제 서비스까지 확인하려면 키 소유자가 기존 키 파일에
 `ANTHROPIC_API_KEY`를 직접 추가한 뒤 아래 테스트를 실행합니다. 이미 키가 설정되어

@@ -1,7 +1,73 @@
 import { isObject } from './config.ts';
 import type { JsonObject, Provider } from './config.ts';
 
+function flattenKimiTools(body: JsonObject): JsonObject {
+  if (!Array.isArray(body.messages) || (body.tools !== undefined && !Array.isArray(body.tools))) return body;
+  const declared = new Map<string, JsonObject>();
+  const active = new Map<string, JsonObject>();
+  const unnamed: unknown[] = [];
+  let changed = false;
+  for (const tool of Array.isArray(body.tools) ? body.tools : []) {
+    if (!isObject(tool) || typeof tool.name !== 'string') { unnamed.push(tool); continue; }
+    declared.set(tool.name, tool);
+    if (tool.defer_loading === true) changed = true;
+    else active.set(tool.name, tool);
+  }
+  // Search results can reference a definition added later in the same request.
+  for (const message of body.messages) {
+    if (!isObject(message) || message.role !== 'system' || !Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (!isObject(block) || block.type !== 'tool_addition' || !isObject(block.tool) || block.tool.type !== 'tool_definition') continue;
+      const definition = block.tool.definition;
+      if (isObject(definition) && typeof definition.name === 'string' && isObject(definition.input_schema)) declared.set(definition.name, definition);
+    }
+  }
+  const messages = body.messages.flatMap(message => {
+    if (!isObject(message) || !Array.isArray(message.content)) return [message];
+    let messageChanged = false;
+    const content = message.content.flatMap(block => {
+      if (isObject(block) && message.role === 'user' && block.type === 'tool_result' && Array.isArray(block.content)) {
+        let resultChanged = false;
+        const result = block.content.map(reference => {
+          if (!isObject(reference) || reference.type !== 'tool_reference' || typeof reference.tool_name !== 'string') return reference;
+          const definition = declared.get(reference.tool_name);
+          if (!definition) return reference;
+          active.set(reference.tool_name, definition);
+          resultChanged = messageChanged = changed = true;
+          return { type: 'text', text: `Tool available: ${reference.tool_name}`, ...(reference.cache_control !== undefined ? { cache_control: reference.cache_control } : {}) };
+        });
+        return resultChanged ? [{ ...block, content: result }] : [block];
+      }
+      if (!isObject(block) || message.role !== 'system' || !['tool_addition', 'tool_removal'].includes(String(block.type)) || !isObject(block.tool)) return [block];
+      const tool = block.tool;
+      const definition = tool.type === 'tool_definition' && isObject(tool.definition) ? tool.definition : undefined;
+      const name = definition?.name ?? (tool.type === 'tool_reference' ? tool.name : undefined);
+      if (typeof name !== 'string' || !name || (definition && !isObject(definition.input_schema))) return [block];
+      if (definition) declared.set(name, definition);
+      if (block.type === 'tool_removal') active.delete(name);
+      else {
+        const available = declared.get(name);
+        if (!available) return [block];
+        active.set(name, available);
+      }
+      messageChanged = true;
+      changed = true;
+      return [];
+    });
+    if (!messageChanged) return [message];
+    return content.length ? [{ ...message, content }] : [];
+  });
+  if (!changed) return body;
+  const tools = [...unnamed, ...[...active.values()].map(tool => {
+    const definition = { ...tool };
+    delete definition.defer_loading;
+    return definition;
+  })];
+  return { ...body, tools, messages };
+}
+
 export function applyInlineToolCompatibility(body: JsonObject, provider: Provider): JsonObject {
+  if (provider.id === 'kimi') return flattenKimiTools(body);
   if (provider.id !== 'deepseek' || !Array.isArray(body.messages) || (body.tools !== undefined && !Array.isArray(body.tools))) return body;
   const tools = Array.isArray(body.tools) ? [...body.tools] : [];
   const positions = new Map<string, number>();

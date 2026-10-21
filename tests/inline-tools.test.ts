@@ -18,7 +18,62 @@ test('inline client tools become deferred declarations and references at the sam
   assert.deepEqual(result.metadata, body.metadata);
   assert.deepEqual(body, original);
   for (const { provider: other } of loadRegistry().values()) {
-    if (other.id !== 'deepseek') assert.equal(applyInlineToolCompatibility(body, other), body);
+    if (!['deepseek', 'kimi'].includes(other.id)) assert.equal(applyInlineToolCompatibility(body, other), body);
+  }
+});
+
+test('Kimi exposes discovered tools without preloading deferred or removed tools', () => {
+  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const search = { name: 'ToolSearch', input_schema: { type: 'object' } };
+  const unused = { ...definition, name: 'unused', defer_loading: true };
+  const body = {
+    tools: [search, unused],
+    messages: [{ role: 'user', content: 'hello' }, { role: 'system', content: [{ type: 'text', text: 'New tools' }, addition] }],
+  };
+  const original = structuredClone(body);
+  const result = applyInlineToolCompatibility(body, kimi);
+  assert.deepEqual(result.tools, [search, definition]);
+  assert.deepEqual(result.messages, [body.messages[0], { role: 'system', content: [{ type: 'text', text: 'New tools' }] }]);
+  assert.deepEqual(body, original);
+  const removed = applyInlineToolCompatibility({ ...body, messages: [...body.messages, { role: 'system', content: [{ type: 'tool_removal', tool: { type: 'tool_reference', name: definition.name } }] }] }, kimi);
+  assert.deepEqual(removed.tools, [search]);
+  assert.deepEqual(removed.messages, result.messages);
+  const initial = applyInlineToolCompatibility({ tools: [search, unused], messages: [body.messages[0]] }, kimi);
+  assert.deepEqual(initial.tools, [search]);
+  const selected = applyInlineToolCompatibility({ tools: [search, unused], messages: [{ role: 'system', content: [{ type: 'tool_addition', tool: { type: 'tool_reference', name: 'unused' } }] }] }, kimi);
+  assert.deepEqual(selected.tools, [search, { ...definition, name: 'unused' }]);
+  assert.deepEqual(selected.messages, []);
+});
+
+test('Kimi uses the current tool definition and preserves text, call history and literal tool result data', () => {
+  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const updated = { ...definition, description: 'Updated document reader', defer_loading: true };
+  const history = [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: definition.name, input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: [addition] }] }];
+  const body = { messages: [{ role: 'system', content: [addition] }, ...history, { role: 'system', content: [{ type: 'tool_addition', tool: { type: 'tool_definition', definition: updated } }] }], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
+  const original = structuredClone(body);
+  const result = applyInlineToolCompatibility(body, kimi);
+  const { defer_loading: _deferred, ...current } = updated;
+  assert.deepEqual(result.tools, [current]);
+  assert.deepEqual(result.messages, history);
+  assert.deepEqual(result.thinking, body.thinking);
+  assert.deepEqual(result.output_config, body.output_config);
+  assert.deepEqual(body, original);
+});
+
+test('Kimi resolves tool search references from deferred declarations and later inline additions', () => {
+  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const search = { name: 'ToolSearch', input_schema: { type: 'object' } };
+  const cache_control = { type: 'ephemeral' };
+  const result = { type: 'tool_result', tool_use_id: 'search_1', content: [{ type: 'text', text: 'Found a tool' }, { type: 'tool_reference', tool_name: definition.name, cache_control }] };
+  const history = [{ role: 'assistant', content: [{ type: 'tool_use', id: 'search_1', name: 'ToolSearch', input: { query: 'docs' } }] }, { role: 'user', content: [result] }];
+  const expectedHistory = [history[0], { role: 'user', content: [{ ...result, content: [result.content[0], { type: 'text', text: `Tool available: ${definition.name}`, cache_control }] }] }];
+  for (const inline of [false, true]) {
+    const body = { tools: [search, { ...definition, name: 'unused', defer_loading: true }, ...(inline ? [] : [{ ...definition, defer_loading: true }])], messages: [...history, ...(inline ? [{ role: 'system', content: [addition] }] : [])] };
+    const original = structuredClone(body);
+    const output = applyInlineToolCompatibility(body, kimi);
+    assert.deepEqual(output.tools, [search, definition]);
+    assert.deepEqual(output.messages, expectedHistory);
+    assert.deepEqual(body, original);
   }
 });
 
