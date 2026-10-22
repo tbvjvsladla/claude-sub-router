@@ -221,8 +221,9 @@ Sonnet의 `-p` 호출에 API 키를 전달합니다. `api_key_source`가 `provid
 
 ### 기능별 모델 지정
 
-`config/subagents.yaml`에서 세 기능의 모델을 독립적으로 선택합니다. 기본값은 모두
-`inherit`이며 Claude와 플러그인의 기존 모델 선택 규칙·환경변수를 유지합니다.
+`config/subagents.yaml`에서 세 기능의 모델을 독립적으로 선택합니다. 서브에이전트와 압축은
+`inherit`, Ouroboros 인터뷰·명확화는 `claude-sonnet-5-5`가 기본값입니다.
+`inherit`를 선택한 항목은 Claude와 플러그인의 기존 모델 선택 규칙·환경변수를 유지합니다.
 메인 연결의 기본 Sonnet을 다른 기능의 공통 기본값으로 지정하지 않습니다.
 원하는 항목의 `model`만 **등록 모델 ID**로 바꾸세요. 등록 모델과 필요한 키 이름은
 `config/providers/*.yaml`에서 확인할 수 있습니다.
@@ -234,7 +235,7 @@ subagents:
 compaction:
   model: inherit
 ouroboros:
-  model: inherit
+  model: claude-sonnet-5-5
 ```
 
 | 항목 | 적용 범위 | 모델을 선택했을 때 |
@@ -280,7 +281,16 @@ Explore/Plan 같은 내장 에이전트까지 변경하려면 `force: true`를 �
 Ouroboros의 실행 worker·평가 모델·개별 역할 설정은 플러그인에서 관리합니다.
 `ouroboros.model`을 선택하면 플러그인 전체의 모델 자동 최신 해석을 끄는 pin 기능도 켭니다.
 개별 역할 모델의 우선순위는 플러그인 규칙을 따릅니다. `inherit`에서는 두 변수를 덮어쓰지 않습니다.
-이 연결은 설치된 Ouroboros 소스와 보고서의 0.55.6 모델 선택 동작을 기준으로 합니다.
+Ouroboros 0.59.5에서 Sonnet 5.5 API 키를 사용한 인터뷰·명확화 생성을 확인했습니다.
+
+Ouroboros의 `inherit`는 메인 Sonnet 모델을 그대로 상속한다는 뜻이 아닙니다.
+플러그인이 `opus` 등 라우터에 등록되지 않은 모델을 선택하면 `400 Unknown model`로
+실패하므로 인터뷰 모델을 등록 ID로 명시합니다. API 키 사용 시 표시되는 claude.ai
+connectors 비활성 경고만으로 인증 실패를 판단하지 마세요. 실제 응답 오류를 확인하세요.
+
+Claude Code 업데이트 후 Ouroboros가 실행 파일을 찾지 못하면, Ouroboros의
+`orchestrator.cli_path`가 `command -v claude`의 현재 경로를 가리키는지 확인하세요.
+한 번의 실행에만 지정하려면 `OUROBOROS_CLI_PATH="$(command -v claude)" claude-sub`를 사용합니다.
 
 YAML의 덮어쓰기는 `claude-sub` 자식 프로세스에만 적용합니다.
 원본 `claude`의 설정 파일이나 전역 셸은 수정하지 않습니다.

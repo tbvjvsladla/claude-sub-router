@@ -45,9 +45,9 @@ test('subagent overrides keep main model, profile, caller environment and settin
   assert.deepEqual(inherited, original);
 });
 
-test('feature policy reads three independent models, with native defaults and legacy YAML compatibility', () => {
+test('feature policy reads three independent models, with a pinned Sonnet interview and legacy YAML compatibility', () => {
   const registry = loadRegistry();
-  assert.deepEqual(loadModelPolicy(registry), defaultModelPolicy());
+  assert.deepEqual(loadModelPolicy(registry), { ...defaultModelPolicy(), ouroboros: { model: 'claude-sonnet-5-5' } });
   const root = mkdtempSync(join(tmpdir(), 'claude-sub-policy-'));
   const path = join(root, 'policy.yaml');
   try {
