@@ -36,7 +36,7 @@ if (process.argv[2] === '--mcp-server') {
 const binary = findExecutable('claude');
 assert.ok(binary, 'Install Claude Code before running test:tool-search');
 const registry = loadRegistry();
-const models = process.argv.slice(2).length ? process.argv.slice(2) : ['kimi-k3'];
+const models = process.argv.slice(2).length ? process.argv.slice(2) : ['kimi-k3.1-pro'];
 for (const model of models) assert.ok(registry.has(model), `Unknown model: ${model}`);
 const root = mkdtempSync(join(tmpdir(), 'claude-sub-tool-search-'));
 const token = `TOOL_SEARCH_OK_${randomUUID()}`;

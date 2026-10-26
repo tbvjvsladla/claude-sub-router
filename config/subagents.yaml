@@ -2,7 +2,7 @@
 # 각 model을 등록 ID로 바꾸면 해당 기능만 변경됩니다. 메인/default 모델과는 별개입니다.
 # 등록된 서드파티 ID (키는 envs/*.env에 저장):
 #   deepseek-pro, deepseek-flash  (DEEPSEEK_API_KEY)
-#   kimi-k3                     (MOONSHOT_API_KEY)
+#   kimi-k3.1-pro               (MOONSHOT_API_KEY)
 #   minimax-m3                  (MINIMAX_API_KEY)
 #   gpt-6.1-sol, gpt-6-luna      (OPENROUTER_API_KEY)
 # Anthropic 등록 ID: claude-sonnet-5-5. 예: model: gpt-6.1-sol

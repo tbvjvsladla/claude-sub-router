@@ -11,9 +11,9 @@ provider:
   api_key_env: MOONSHOT_API_KEY
 
 models:
-  - id: kimi-k3
-    upstream_model: k3
-    display_name: Kimi K3
+  - id: kimi-k3.1-pro
+    upstream_model: k3.1-pro
+    display_name: Kimi K3.1 Pro
     description: Kimi Coding · 1M Context
 
     context:
@@ -26,8 +26,8 @@ models:
         effort: output_config.effort
         thinking: thinking
       mapping:
-        # Kimi Coding serves thinking-off requests through K2.8 Preview.
-        none: { action: disable }
+        # K3.1 Pro requires thinking; reject disabled requests before upstream.
+        none: { action: error }
         low: low
         medium: high
         high: high

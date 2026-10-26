@@ -85,7 +85,7 @@ test('compaction policy is isolated per client and official request class; other
   });
   const base = await listen(proxy);
   const history = [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE_THINKING', signature: 'FAKE_SIGNATURE' }] }, { role: 'user', content: 'Please compact this conversation' }];
-  const body = { model: 'kimi-k3', messages: history, system: [{ type: 'text', text: 'FAKE_SYSTEM' }], tools: [{ name: 'Artifact', input_schema: { type: 'object', properties: { value: { type: 'string', pattern: '^[^\\0]*$' } } } }], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
+  const body = { model: 'kimi-k3.1-pro', messages: history, system: [{ type: 'text', text: 'FAKE_SYSTEM' }], tools: [{ name: 'Artifact', input_schema: { type: 'object', properties: { value: { type: 'string', pattern: '^[^\\0]*$' } } } }], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
   const original = structuredClone(body);
   async function send(headers: Record<string, string>, path = '/v1/messages', requestedBody = body) {
     const response = await fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify(requestedBody) });
@@ -103,23 +103,23 @@ test('compaction policy is isolated per client and official request class; other
       const headers: Record<string, string> = { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-compaction': 'manual' };
       if (requestClass) headers['x-claude-code-request-class'] = requestClass;
       assert.equal((await send(headers)).status, 200);
-      assert.equal(calls.at(-1)!.body.model, 'k3');
+      assert.equal(calls.at(-1)!.body.model, 'k3.1-pro');
       assert.equal(calls.at(-1)!.headers.get(COMPACTION_MODEL_HEADER), null);
     }
     assert.equal((await send({ 'x-claude-code-request-class': 'compaction' })).status, 200);
-    assert.equal(calls.at(-1)!.body.model, 'k3');
+    assert.equal(calls.at(-1)!.body.model, 'k3.1-pro');
     for (const trigger of ['manual', 'auto', 'reactive']) {
       assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-request-class': 'compaction', 'x-claude-code-compaction': trigger, authorization: 'Bearer FAKE_OAUTH' })).status, 200);
       const call = calls.at(-1)!;
       assert.equal(call.body.model, 'deepseek-flash');
-      assert.deepEqual({ ...call.body, model: 'kimi-k3', tools: original.tools }, original);
+      assert.deepEqual({ ...call.body, model: 'kimi-k3.1-pro', tools: original.tools }, original);
       const tools = call.body.tools as { input_schema: { properties: { value: { pattern: string } } } }[];
       assert.equal(tools[0]!.input_schema.properties.value.pattern, String.raw`^[^\u0000]*$`);
       assert.equal(call.headers.get('authorization'), null);
       assert.equal(call.headers.get('x-api-key'), 'FAKE_DEEPSEEK');
       assert.equal(call.headers.get(COMPACTION_MODEL_HEADER), null);
       assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.model, 'deepseek-flash');
-      assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.requested_model, 'kimi-k3');
+      assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.requested_model, 'kimi-k3.1-pro');
     }
     const before = calls.length;
     await Promise.all(['deepseek-flash', 'gpt-6-luna'].map(model => send({ [COMPACTION_MODEL_HEADER]: model, 'x-claude-code-request-class': 'compaction' })));
@@ -157,7 +157,7 @@ test('Artifact schemas work for DeepSeek Flash and Pro after switching models, i
   const messages = [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE_THINKING', signature: 'FAKE_SIGNATURE' }] }, { role: 'user', content: originalPattern }];
   try {
     for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
-      for (const model of ['kimi-k3', 'deepseek-flash', 'minimax-m3.1-flash', 'deepseek-pro', 'claude-sonnet-5-5']) {
+      for (const model of ['kimi-k3.1-pro', 'deepseek-flash', 'minimax-m3.1-flash', 'deepseek-pro', 'claude-sonnet-5-5']) {
         const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_NATIVE_TOKEN' }, body: JSON.stringify({ model, stream: true, thinking: { type: 'adaptive' }, output_config: { effort: 'xhigh' }, tools: [{ name: 'Artifact', input_schema: schema }], messages }) });
         assert.equal(response.status, 200);
         assert.match(await response.text(), /message_stop/);
@@ -186,14 +186,14 @@ test('inline tool additions use each provider format, including compaction and t
   const original = structuredClone(messages);
   try {
     for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
-      for (const model of ['deepseek-flash', 'deepseek-pro', 'kimi-k3']) {
+      for (const model of ['deepseek-flash', 'deepseek-pro', 'kimi-k3.1-pro']) {
         for (const compaction of [false, true]) {
           const headers: Record<string, string> = compaction ? { [COMPACTION_MODEL_HEADER]: 'deepseek-flash', 'x-claude-code-request-class': 'compaction' } : {};
           const response = await fetch(`${base}${path}`, { method: 'POST', headers, body: JSON.stringify({ model, messages, stream: true, output_config: { effort: 'xhigh' } }) });
           assert.equal(response.status, 200);
           await response.text();
           const wire = calls.at(-1)!;
-          if (model === 'kimi-k3' && !compaction) {
+          if (model === 'kimi-k3.1-pro' && !compaction) {
             assert.deepEqual(wire.messages, [messages[0], { role: 'system', content: [messages[1]!.content[0]] }]);
             assert.deepEqual(wire.tools, [definition]);
           } else {
@@ -302,7 +302,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
     'gpt-6-luna': ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
     'deepseek-pro': [null, 'low', 'high', 'high', 'high', 'max'],
     'deepseek-flash': [null, 'low', 'high', 'high', 'high', 'max'],
-    'kimi-k3': [null, 'low', 'high', 'high', 'max', 'max'],
+    'kimi-k3.1-pro': [null, 'low', 'high', 'high', 'max', 'max'],
     'minimax-m3': [null, null, null, null, null, null],
     'minimax-m3.1-flash': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
   };
@@ -316,7 +316,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const before = calls.length;
             const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_OAUTH' }, body: JSON.stringify(body) });
             const none = toggleOff || effort === 'none';
-            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash'].includes(modelId);
+            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro'].includes(modelId);
             assert.equal(response.status, unsupported ? 400 : 200, `${modelId} ${effort} ${path} toggleOff=${toggleOff}`);
             const result = await response.text();
             if (unsupported) {
@@ -354,7 +354,7 @@ test('SSE streams immediately with backpressure and cancels upstream on disconne
   try {
     const started = performance.now();
     const controller = new AbortController();
-    const response = await fetch(`${base}/v1/messages`, { method: 'POST', signal: controller.signal, body: JSON.stringify({ model: 'kimi-k3', stream: true }) });
+    const response = await fetch(`${base}/v1/messages`, { method: 'POST', signal: controller.signal, body: JSON.stringify({ model: 'kimi-k3.1-pro', stream: true }) });
     const reader = response.body!.getReader();
     const first = await reader.read();
     assert.equal(new TextDecoder().decode(first.value), 'data: first\n\n');
@@ -369,7 +369,7 @@ test('invalid JSON, body limits and upstream failures are bounded', async () => 
   const proxy = createRouterServer(loadRegistry(), { environment: { MOONSHOT_API_KEY: 'FAKE' }, bodyLimit: 100, fetch: async () => { throw new TypeError('FAKE_PRIVATE_DETAIL'); } });
   const base = await listen(proxy);
   try {
-    for (const [body, status] of [['{', 400], ['x'.repeat(101), 413], ['{"model":"kimi-k3"}', 502]] as const) {
+    for (const [body, status] of [['{', 400], ['x'.repeat(101), 413], ['{"model":"kimi-k3.1-pro"}', 502]] as const) {
       const response = await fetch(`${base}/v1/messages`, { method: 'POST', body });
       assert.equal(response.status, status); assert.equal((await response.text()).includes('FAKE_PRIVATE_DETAIL'), false);
     }
@@ -391,12 +391,12 @@ test('upstream timeouts abort the connection and redirects never forward credent
   const proxy = createRouterServer(registry, { environment: { MOONSHOT_API_KEY: 'FAKE' }, timeoutMs: 50, fetch: (_input, init) => fetch(`${address}/${redirect ? 'redirect' : 'timeout'}`, init) });
   const base = await listen(proxy);
   try {
-    const response = await fetch(`${base}/v1/messages`, { method: 'POST', body: '{"model":"kimi-k3"}' });
+    const response = await fetch(`${base}/v1/messages`, { method: 'POST', body: '{"model":"kimi-k3.1-pro"}' });
     assert.equal(response.status, 502); await response.text();
     for (let attempt = 0; attempt < 50 && !disconnected; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     assert.equal(disconnected, true);
     redirect = true;
-    const redirected = await fetch(`${base}/v1/messages`, { method: 'POST', body: '{"model":"kimi-k3"}', redirect: 'manual' });
+    const redirected = await fetch(`${base}/v1/messages`, { method: 'POST', body: '{"model":"kimi-k3.1-pro"}', redirect: 'manual' });
     assert.equal(redirected.status, 307); assert.equal(await redirected.text(), 'redirect');
     assert.equal(redirectCalls, 0); assert.equal(redirected.headers.has('location'), false);
   } finally { await close(proxy); await close(upstream); await close(target); }

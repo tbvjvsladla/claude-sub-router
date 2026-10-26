@@ -373,12 +373,12 @@ API 클라이언트는 `output_config: { effort: none }`을 직접 보낼 수도
 | GPT-6.1 Sol | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 | Sonnet 5.5 | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 | DeepSeek Pro / Flash | thinking 끄기 | `low` | `high` | `high` | `high` | `max` |
-| Kimi K3 | thinking 끄기¹ | `low` | `high` | `high` | `max` | `max` |
+| Kimi K3.1 Pro | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
 | MiniMax M3 | thinking 끄기 | effort 제거 | effort 제거 | effort 제거 | effort 제거 | effort 제거 |
 | MiniMax M3.1 Flash | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 
-¹ Kimi Coding은 thinking을 끄면 Provider 내부에서 K2.8 Preview의 비추론 모드로
-처리합니다. 라우터가 `upstream_model`을 바꾸는 것은 아닙니다.
+Kimi K3.1 Pro는 thinking이 필수이며 `none`·thinking 끄기는 upstream 호출 전에
+HTTP 400으로 거부합니다. effort를 생략하면 Provider 기본값 `high`가 적용됩니다.
 Sonnet 5.5의 `between_tools`는 도구 사이 thinking을 남기므로 완전한 `none`으로
 취급하지 않으며, 클라이언트가 명시하면 그대로 보존합니다.
 [DeepSeek 추론 제어](https://api-docs.deepseek.com/guides/thinking_mode/),
@@ -400,12 +400,16 @@ Moonshot/Kimi Open Platform 키는 Kimi Code와 호환되지 않습니다. 기�
 `https://api.kimi.com/coding/`이며 해외 계정용 공식 주소는
 `https://api.kimi.ai/coding/`입니다. 계정에 맞게 `config/providers/kimi.yaml`에서 변경하세요.
 
-`kimi-k3`는 `k3`를 호출합니다. Plus/Moderato는 K3 256K, Pro/Allegretto 이상은
-K3 1M을 지원합니다. Plus/Moderato에서는 `context.window`를 `262144`,
+`kimi-k3.1-pro`는 공식 API 모델 **`k3.1-pro`**를 호출합니다. 기존 `kimi-k3` 선택지는
+교체되었으므로 실행 인수와 기능별 YAML에서 사용하던 ID도 새 ID로 바꾸세요.
+기존 K3 대화를 이어서 전환하지 말고 새 세션으로 시작하는 것을 공식 문서에서 권장합니다.
+Plus/Moderato는 K3.1 Pro 256K, Pro/Allegretto 이상은 1M을 지원합니다.
+Plus/Moderato에서는 `context.window`를 `262144`,
 `auto_compact_threshold`를 그보다 작은 값(예: `200000`)으로 설정하세요.
-K3 권한이 없는 기존 Andante 요금제는 `upstream_model: kimi-for-coding`이 필요합니다.
-현재 기본 Kimi 설정은 K3 1M 권한이 있는 요금제를 전제로 합니다.
+현재 기본 Kimi 설정은 K3.1 Pro 1M 권한이 있는 요금제를 전제로 합니다.
+기존 Andante 요금제는 K3.1 Pro를 지원하지 않습니다.
 [공식 모델·주소·요금제 안내](https://www.kimi.com/code/docs/en/kimi-code/models.html),
+[2026-10-23 K3.1 Pro 출시 기록](https://www.kimi.com/code/docs/en/kimi-code/whats-new.html),
 [인증·권한·사용량 오류 안내](https://www.kimi.com/code/docs/en/kimi-code/error-reference.html).
 
 DeepSeek V4.1 Flash 1017의 공식 호출 ID는 **`deepseek-flash`**입니다.
@@ -439,7 +443,7 @@ Kimi는 `tool_definition`뿐 아니라 메시지 안의 `tool_addition` 이름 �
 ```bash
 npm run build
 claude-sub-router restart
-claude-sub --model kimi-k3 -p 'Reply with exactly OK.' --effort low
+claude-sub --model kimi-k3.1-pro -p 'Reply with exactly OK.' --effort low
 claude-sub --model deepseek-flash -p 'Reply with exactly OK.' --effort low
 ```
 
@@ -546,7 +550,7 @@ node scripts/test-cli.mjs deepseek-flash
 
 ```bash
 npm run build
-npm run test:tool-search -- kimi-k3 deepseek-flash
+npm run test:tool-search -- kimi-k3.1-pro deepseek-flash
 ```
 
 이 테스트는 임시 로컬 MCP 서버와 `ENABLE_TOOL_SEARCH=true`를 사용합니다.
@@ -575,7 +579,7 @@ npm run test:cli -- --anthropic-auth
 
 ```bash
 npm run test:subagents
-npm run test:subagents -- kimi-k3 minimax-m3
+npm run test:subagents -- kimi-k3.1-pro minimax-m3
 npm run test:subagents -- --policies-only
 SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 ```
@@ -593,6 +597,17 @@ SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 특히 `costBasis: unknown`인 커스텀 모델에서는 Provider의 실제 청구액과 다를 수 있습니다.
 
 ### 최근 검증 결과
+
+2026-10-27에 Claude Code **2.1.310**, Node.js **24.15.0**, Linux/WSL2에서
+`kimi-k3.1-pro` → `k3.1-pro` 전환을 확인했습니다. 실제
+`claude-sub -p`의 Read·토큰 응답, 실제 PTY의 Read·응답·키보드 후속 입력·응답·정상 종료,
+ToolSearch→MCP `get_token` 호출이 모두 통과했습니다. 관측한 upstream 응답은 모두 HTTP 200이며,
+MCP 미사용 도구는 로드·호출하지 않았습니다. 관련 자동 검사 38개, 타입 검사와 빌드도 통과했습니다.
+K3.1 Pro는 thinking을 끌 수 없으며, `none`·끄기 요청의 HTTP 400 거부와 5단계 effort 매핑은
+메시지 생성·토큰 계산의 오프라인 HTTP 검사로 확인했습니다.
+
+아래는 교체 전 K3를 포함한 **2026-10-21의 과거 검증 기록**입니다.
+K3.1 Pro의 실제 서브에이전트 모델 지정 검증은 이번 전환 범위에 포함하지 않았습니다.
 
 2026-10-21에 Claude Code **2.1.305**, Node.js **24.15.0**, Linux/WSL2에서 확인했습니다.
 비대화형은 실제 Read 도구로 임의 토큰 파일을 읽고 반환하는 시나리오,

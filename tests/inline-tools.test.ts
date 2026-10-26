@@ -42,7 +42,7 @@ test('inline client tools become deferred declarations and references at the sam
 });
 
 test('Kimi exposes discovered tools without preloading deferred or removed tools', () => {
-  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const kimi = loadRegistry().get('kimi-k3.1-pro')!.provider;
   const search = { name: 'ToolSearch', input_schema: { type: 'object' } };
   const unused = { ...definition, name: 'unused', defer_loading: true };
   const body = {
@@ -65,7 +65,7 @@ test('Kimi exposes discovered tools without preloading deferred or removed tools
 });
 
 test('Kimi uses the current tool definition and preserves text, call history and literal tool result data', () => {
-  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const kimi = loadRegistry().get('kimi-k3.1-pro')!.provider;
   const updated = { ...definition, description: 'Updated document reader', defer_loading: true };
   const history = [{ role: 'assistant', content: [{ type: 'tool_use', id: 'call_1', name: definition.name, input: {} }] }, { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_1', content: [addition] }] }];
   const body = { messages: [{ role: 'system', content: [addition] }, ...history, { role: 'system', content: [{ type: 'tool_addition', tool: { type: 'tool_definition', definition: updated } }] }], thinking: { type: 'adaptive' }, output_config: { effort: 'low' } };
@@ -80,7 +80,7 @@ test('Kimi uses the current tool definition and preserves text, call history and
 });
 
 test('Kimi resolves tool search references from deferred declarations and later inline additions', () => {
-  const kimi = loadRegistry().get('kimi-k3')!.provider;
+  const kimi = loadRegistry().get('kimi-k3.1-pro')!.provider;
   const search = { name: 'ToolSearch', input_schema: { type: 'object' } };
   const cache_control = { type: 'ephemeral' };
   const result = { type: 'tool_result', tool_use_id: 'search_1', content: [{ type: 'text', text: 'Found a tool' }, { type: 'tool_reference', tool_name: definition.name, cache_control }] };

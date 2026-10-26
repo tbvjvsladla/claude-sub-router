@@ -14,7 +14,7 @@ test('subagent YAML rejects mistakes and missing explicit paths, with backward c
   try {
     assert.deepEqual(loadSubagentConfig(registry, { root }), { model: 'inherit', force: false });
     assert.throws(() => loadSubagentConfig(registry, { path }), /could not read/);
-    for (const source of ['model: missing\nforce: true', 'model: deepseek-flash\nforce: "true"', 'model: deepseek-flash\nforce: true\nextra: true', 'model: deepseek-flash\nmodel: kimi-k3\nforce: true', 'model: [', 'model: ""\nforce: true', 'model: deepseek-flash']) {
+    for (const source of ['model: missing\nforce: true', 'model: deepseek-flash\nforce: "true"', 'model: deepseek-flash\nforce: true\nextra: true', 'model: deepseek-flash\nmodel: kimi-k3.1-pro\nforce: true', 'model: [', 'model: ""\nforce: true', 'model: deepseek-flash']) {
       writeFileSync(path, source);
       assert.throws(() => loadSubagentConfig(registry, { path }));
     }

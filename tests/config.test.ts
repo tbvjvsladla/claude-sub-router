@@ -20,10 +20,15 @@ function registryFor(value: unknown) {
 test('registry preserves the existing providers, defaults and YAML aliases', () => {
   const registry = loadRegistry();
   assert.equal(getDefaultModel(registry), 'claude-sonnet-5-5');
-  assert.equal(registry.get('kimi-k3')?.model.upstream_model, 'k3');
+  const kimi = registry.get('kimi-k3.1-pro');
+  assert.ok(kimi);
+  assert.equal(kimi.model.upstream_model, 'k3.1-pro');
+  assert.equal(kimi.model.display_name, 'Kimi K3.1 Pro');
+  assert.deepEqual(kimi.model.context, { window: 1048576, auto_compact_threshold: 800000 });
+  assert.deepEqual(kimi.model.reasoning?.mapping, { none: { action: 'error' }, low: 'low', medium: 'high', high: 'high', xhigh: 'max', max: 'max' });
+  assert.equal(registry.has('kimi-k3'), false);
   assert.deepEqual(registry.get('deepseek-pro')?.model.reasoning, registry.get('deepseek-flash')?.model.reasoning);
   assert.equal(registry.get('deepseek-pro')?.model.reasoning?.mapping?.xhigh, 'high');
-  assert.equal(registry.get('kimi-k3')?.model.reasoning?.mapping?.xhigh, 'max');
   const minimax = registry.get('minimax-m3')!;
   assert.equal(minimax.provider.base_url, 'https://api.minimax.io/anthropic');
   assert.equal(minimax.provider.api_key_env, 'MINIMAX_API_KEY');
@@ -50,7 +55,7 @@ test('OpenRouter GPT models share positive efforts but declare different none su
     assert.equal(entry.model.reasoning?.unsupported_level, 'error');
   }
   assert.deepEqual(registry.get('claude-sonnet-5-5')?.model.reasoning?.mapping?.none, { action: 'error' });
-  for (const id of ['deepseek-pro', 'deepseek-flash', 'kimi-k3']) assert.deepEqual(registry.get(id)?.model.reasoning?.mapping?.none, { action: 'disable' });
+  for (const id of ['deepseek-pro', 'deepseek-flash']) assert.deepEqual(registry.get(id)?.model.reasoning?.mapping?.none, { action: 'disable' });
 });
 
 test('MiniMax M3.1 Flash maps positive efforts and rejects thinking off before sending upstream', () => {
@@ -165,7 +170,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash'].includes(model.id);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
@@ -184,7 +189,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
 
 test('settings and launcher preserve the native profile and apply routing only to the child', () => {
   const registry = loadRegistry();
-  const existing = { unrelated: true, model: 'kimi-k3', modelSettings: { 'kimi-k3': { unrelated: 'keep' } } };
+  const existing = { unrelated: true, model: 'kimi-k3.1-pro', modelSettings: { 'kimi-k3.1-pro': { unrelated: 'keep' } } };
   const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
   const original = structuredClone({ existing, inherited });
   const { environment, settings } = buildLaunchConfig(registry, existing, inherited);
@@ -198,8 +203,8 @@ test('settings and launcher preserve the native profile and apply routing only t
   for (const name of Object.keys(inherited).filter(name => !['PATH', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].includes(name))) assert.equal(environment[name], undefined);
   assert.deepEqual({ existing, inherited }, original);
   const modelSettings = settings.modelSettings as Record<string, Record<string, unknown>>;
-  assert.equal(modelSettings['kimi-k3']?.autoCompactWindow, 800000);
-  assert.equal(modelSettings['kimi-k3']?.unrelated, 'keep');
+  assert.equal(modelSettings['kimi-k3.1-pro']?.autoCompactWindow, 800000);
+  assert.equal(modelSettings['kimi-k3.1-pro']?.unrelated, 'keep');
   assert.equal(modelSettings['minimax-m3']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['gpt-6.1-sol']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['gpt-6-luna']?.autoCompactWindow, 800000);
