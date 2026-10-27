@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadRegistry } from '../dist/config.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -27,9 +27,12 @@ try {
   }
   assert.ok(files.includes(`${name}/envs/.env.example`));
   assert.ok(files.includes(`${name}/config/subagents.yaml`));
+  assert.equal(files.includes(`${name}/config/subagents.local.yaml`), false);
   execFileSync('tar', ['-xzf', archive, '-C', temporary]);
   const project = join(temporary, name);
   execFileSync('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: project, stdio: 'pipe', timeout: 120000 });
+  const { defaultModelPolicy, loadModelPolicy } = await import(pathToFileURL(join(project, 'dist/subagents.js')).href);
+  assert.deepEqual(loadModelPolicy(loadRegistry()), defaultModelPolicy());
   assert.equal(existsSync(join(project, 'node_modules/typescript')), false);
   const environment = { PATH: process.env.PATH, HOME: temporary };
   const models = JSON.parse(execFileSync(process.execPath, ['dist/cli.js', 'models'], { cwd: project, env: environment, encoding: 'utf8' }));

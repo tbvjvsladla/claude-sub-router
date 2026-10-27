@@ -22,6 +22,7 @@ __pycache__/
 *.log
 /temp/
 config/claude-test.json
+/config/subagents.local.yaml
 *_progress.md
 
 # Local development tools and user-specific settings

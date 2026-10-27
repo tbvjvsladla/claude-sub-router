@@ -50,10 +50,21 @@ test('install/uninstall round trip preserves native Claude, credentials and user
     const preserved = ['.claude/.credentials.json', '.claude-sub/.credentials.json', '.claude-sub/projects/session.json', '.local/bin/claude', '.config/keys.env'];
     for (const path of preserved) { mkdirSync(dirname(join(home, path)), { recursive: true }); writeFileSync(join(home, path), 'FAKE_PRESERVED_DATA'); }
     await install(ctx);
+    const localPolicy = join(root, 'config/subagents.local.yaml');
+    assert.equal(existsSync(localPolicy), false);
+    const localSource = 'ouroboros:\n  model: claude-sonnet-5-5\n';
+    writeFileSync(localPolicy, localSource);
     assert.equal(lstatSync(join(root, 'envs/keys.env')).mode & 0o777, 0o600);
     assert.equal(existsSync(join(root, '.env')), false);
     const bashrc = readFileSync(join(home, '.bashrc'), 'utf8');
+    writeFileSync(localPolicy, 'ouroboros:\n  model: missing\n');
+    calls.length = 0;
+    await assert.rejects(() => install(ctx), /subagents\.local\.yaml\.ouroboros/);
+    assert.equal(readFileSync(join(home, '.bashrc'), 'utf8'), bashrc);
+    assert.equal(calls.some(args => args.includes('restart')), false);
+    writeFileSync(localPolicy, localSource);
     await install(ctx);
+    assert.equal(readFileSync(localPolicy, 'utf8'), localSource);
     assert.equal(readFileSync(join(home, '.bashrc'), 'utf8'), bashrc);
     assert.equal(readFileSync(join(home, '.local/bin/claude-sub'), 'utf8'), commandWrapper('launch', ctx));
     const unit = join(home, '.config/systemd/user', SERVICE);
@@ -76,6 +87,7 @@ test('install/uninstall round trip preserves native Claude, credentials and user
     assert.equal(readFileSync(join(home, '.bashrc'), 'utf8').includes('# >>> claude-sub >>>'), false);
     assert.ok(readFileSync(join(home, '.bashrc'), 'utf8').includes('legacy-provider()'));
     assert.ok(existsSync(join(root, 'envs/keys.env')));
+    assert.equal(readFileSync(localPolicy, 'utf8'), localSource);
     for (const path of preserved) assert.equal(readFileSync(join(home, path), 'utf8'), 'FAKE_PRESERVED_DATA');
     await uninstall(ctx);
   } finally { rmSync(directory, { recursive: true, force: true }); }

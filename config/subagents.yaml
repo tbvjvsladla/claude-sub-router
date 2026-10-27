@@ -1,5 +1,8 @@
-# 기능별 모델 선택. inherit는 Claude/플러그인의 기존 선택 규칙을 그대로 따릅니다.
-# 각 model을 등록 ID로 바꾸면 해당 기능만 변경됩니다. 메인/default 모델과는 별개입니다.
+# 공통 기본값과 기능 설명. 이 파일은 Git으로 배포하므로 PC별 값을 직접 수정하지 마세요.
+# PC별 선택은 같은 폴더의 subagents.local.yaml에 변경할 섹션/키만 적습니다.
+# 예: ouroboros: { model: claude-sonnet-5-5 }
+# inherit는 Claude/플러그인의 기존 선택 규칙을 그대로 따릅니다.
+# 로컬 model을 등록 ID로 바꾸면 해당 기능만 변경됩니다. 메인/default 모델과는 별개입니다.
 # 등록된 서드파티 ID (키는 envs/*.env에 저장):
 #   deepseek-pro, deepseek-flash  (DEEPSEEK_API_KEY)
 #   kimi-k3.1-pro               (MOONSHOT_API_KEY)
@@ -22,5 +25,5 @@ ouroboros:
   # Ouroboros의 인터뷰·명확화 모델 (Claude Code backend). 실행 worker/평가 모델은 별도입니다.
   # 선택 시 명확화 모델을 고정하고, 플러그인 전체의 모델 자동 최신 해석을 끕니다 (PIN_MODELS=1).
   # inherit는 메인 모델 상속이 아니라 Ouroboros 자체 선택을 유지합니다.
-  # 인터뷰·명확화는 등록된 Sonnet을 명시하여 자동 Opus 선택을 방지합니다.
-  model: claude-sonnet-5-5
+  # 자동 Opus 선택을 피하려면 로컬 파일에서 등록된 Sonnet 등을 명시하세요.
+  model: inherit

@@ -18,48 +18,63 @@ export function defaultModelPolicy(): ModelPolicy {
   return { subagents: { model: 'inherit', force: false }, compaction: { model: 'inherit' }, ouroboros: { model: 'inherit' } };
 }
 
+/** Loads shared defaults and per-PC overrides, or one explicitly selected policy file. */
 export function loadModelPolicy(registry: Registry, options: { root?: string; path?: string } = {}): ModelPolicy {
-  const path = options.path ? resolve(options.path) : join(options.root ?? ROOT, 'config/subagents.yaml');
-  let source: string;
-  try { source = readFileSync(path, 'utf8'); }
-  catch (error) {
-    // Older installations without this optional file keep Claude's selection rules.
-    if (!options.path && (error as NodeJS.ErrnoException).code === 'ENOENT') return defaultModelPolicy();
-    throw new ConfigError(`${path}: could not read model policy`);
-  }
-  let value: unknown;
-  try {
-    const document = parseDocument(source, { uniqueKeys: true });
-    if (document.errors.length) throw new Error('Invalid YAML');
-    value = document.toJS({ maxAliasCount: 100 });
-  } catch { throw new ConfigError(`${path}: could not read valid YAML`); }
-  if (!isObject(value) || !Object.keys(value).length) throw new ConfigError(`${path}: expected model policy sections`);
   const policy = defaultModelPolicy();
-  // Existing model/force files remain valid, but cannot compete with new sections.
-  if ('model' in value || 'force' in value) {
-    policy.subagents = readSelection(value, 'subagents', true);
+  if (options.path) {
+    readPolicy(resolve(options.path), false, false);
   } else {
-    if (Object.keys(value).some(key => !['subagents', 'compaction', 'ouroboros'].includes(key))) {
-      throw new ConfigError(`${path}: expected only subagents, compaction and ouroboros sections`);
-    }
-    if (value.subagents !== undefined) policy.subagents = readSelection(value.subagents, 'subagents', true);
-    if (value.compaction !== undefined) policy.compaction = readSelection(value.compaction, 'compaction', false);
-    if (value.ouroboros !== undefined) policy.ouroboros = readSelection(value.ouroboros, 'ouroboros', false);
+    const directory = join(options.root ?? ROOT, 'config');
+    readPolicy(join(directory, 'subagents.yaml'), true, false);
+    readPolicy(join(directory, 'subagents.local.yaml'), true, true);
   }
   return policy;
 
-  function readSelection(selection: unknown, section: string, agent: true): SubagentConfig;
-  function readSelection(selection: unknown, section: string, agent: false): { model: string };
-  function readSelection(selection: unknown, section: string, agent: boolean) {
-    if (!isObject(selection) || Object.keys(selection).some(key => !['model', ...(agent ? ['force'] : [])].includes(key)) ||
-        typeof selection.model !== 'string' || !/^[\x21-\x7e]+$/.test(selection.model) ||
-        (agent && typeof selection.force !== 'boolean')) {
-      throw new ConfigError(`${path}.${section}: expected model (string)${agent ? ' and force (boolean)' : ''}`);
+  function readPolicy(path: string, optional: boolean, partial: boolean): void {
+    let source: string;
+    try { source = readFileSync(path, 'utf8'); }
+    catch (error) {
+      if (optional && error instanceof Error && 'code' in error && error.code === 'ENOENT') return;
+      throw new ConfigError(`${path}: could not read model policy`);
     }
-    if (selection.model !== 'inherit' && !registry.has(selection.model)) {
-      throw new ConfigError(`${path}.${section}: model must be inherit or a registered model ID (${[...registry.keys()].join(', ')})`);
+    let value: unknown;
+    try {
+      const document = parseDocument(source, { uniqueKeys: true });
+      if (document.errors.length) throw new Error('Invalid YAML');
+      if (partial && document.contents === null) return;
+      value = document.toJS({ maxAliasCount: 100 });
+    } catch { throw new ConfigError(`${path}: could not read valid YAML`); }
+    if (!isObject(value) || (!partial && !Object.keys(value).length)) throw new ConfigError(`${path}: expected model policy sections`);
+    // Existing full policy files may use model/force; local overrides use sections only.
+    if (!partial && ('model' in value || 'force' in value)) {
+      readSelection(value, 'subagents');
+    } else {
+      if (Object.keys(value).some(key => !['subagents', 'compaction', 'ouroboros'].includes(key))) {
+        throw new ConfigError(`${path}: expected only subagents, compaction and ouroboros sections`);
+      }
+      for (const section of ['subagents', 'compaction', 'ouroboros'] as const) {
+        if (section in value) readSelection(value[section], section);
+      }
     }
-    return agent ? { model: selection.model, force: selection.force as boolean } : { model: selection.model };
+
+    function readSelection(selection: unknown, section: keyof ModelPolicy): void {
+      const agent = section === 'subagents';
+      if (!isObject(selection) || Object.keys(selection).some(key => !['model', ...(agent ? ['force'] : [])].includes(key))) {
+        throw new ConfigError(`${path}.${section}: expected model (string)${agent ? ' and force (boolean)' : ''}`);
+      }
+      if (!partial || 'model' in selection) {
+        const model = selection.model;
+        if (typeof model !== 'string' || !/^[\x21-\x7e]+$/.test(model)) throw new ConfigError(`${path}.${section}: expected model (string)`);
+        if (model !== 'inherit' && !registry.has(model)) {
+          throw new ConfigError(`${path}.${section}: model must be inherit or a registered model ID (${[...registry.keys()].join(', ')})`);
+        }
+        policy[section].model = model;
+      }
+      if (agent && (!partial || 'force' in selection)) {
+        if (typeof selection.force !== 'boolean') throw new ConfigError(`${path}.${section}: expected force (boolean)`);
+        policy.subagents.force = selection.force;
+      }
+    }
   }
 }
 

@@ -45,6 +45,10 @@ source ./env.bash
 claude-sub
 ```
 
+PC마다 서브에이전트·압축·Ouroboros 모델을 다르게 쓰려면 설치 폴더의
+[`config/subagents.local.yaml`](#pc별-모델-설정-subagentslocalyaml)을 직접 만드세요.
+로컬 파일은 자동으로 읽으며, 파일이 없으면 세 기능 모두 `inherit`로 실행됩니다.
+
 `envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`,
 `OPENROUTER_API_KEY`, 선택 항목인 `ANTHROPIC_API_KEY` 칸이 있습니다.
 MiniMax M3와 M3.1 Flash는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
@@ -219,13 +223,21 @@ Sonnet의 `-p` 호출에 API 키를 전달합니다. `api_key_source`가 `provid
 `claude-sub --check`의 `anthropic_auth`에는 키 설정 여부와 모드 정책만 표시하며
 키 값은 표시하지 않습니다.
 
-### 기능별 모델 지정
+### PC별 모델 설정 (`subagents.local.yaml`)
 
-`config/subagents.yaml`에서 세 기능의 모델을 독립적으로 선택합니다. 서브에이전트와 압축은
-`inherit`, Ouroboros 인터뷰·명확화는 `claude-sonnet-5-5`가 기본값입니다.
+`config/subagents.yaml`은 Git으로 배포하는 **공통 기본값과 설명**입니다. 세 기능의 모델은
+모두 `inherit`, 서브 모델 강제 적용은 `false`가 기본값입니다. PC별 선택은
+**`config/subagents.local.yaml`에 변경할 섹션과 키만 작성**하세요. 로컬 파일은 Git과
+Release/npm 배포에서 제외하며, 없어도 공통 기본값으로 실행됩니다.
+
+| 파일 | 역할 | Git 및 배포 |
+| --- | --- | --- |
+| `config/subagents.yaml` | 공통 기본값·주석·새 knob 배포 | 공유 |
+| `config/subagents.local.yaml` | 해당 PC에서 변경할 값 | 제외; 각 PC에서 직접 생성 |
+
 `inherit`를 선택한 항목은 Claude와 플러그인의 기존 모델 선택 규칙·환경변수를 유지합니다.
 메인 연결의 기본 Sonnet을 다른 기능의 공통 기본값으로 지정하지 않습니다.
-원하는 항목의 `model`만 **등록 모델 ID**로 바꾸세요. 등록 모델과 필요한 키 이름은
+로컬 파일의 원하는 항목에 **등록 모델 ID**를 적으세요. 등록 모델과 필요한 키 이름은
 `config/providers/*.yaml`에서 확인할 수 있습니다.
 
 ```yaml
@@ -235,8 +247,38 @@ subagents:
 compaction:
   model: inherit
 ouroboros:
+  model: inherit
+```
+
+위 내용은 공통 기본값입니다. 예를 들어 이 PC의 서브에이전트와 Ouroboros 모델만
+선택하려면 **claude-sub-router 설치 폴더에서** 로컬 파일을 만듭니다. 기존 파일이
+있으면 같은 파일을 편집하세요. 설치기가 이 파일을 자동 생성하지는 않습니다.
+
+```bash
+nano config/subagents.local.yaml
+```
+
+필요한 섹션과 키를 다음처럼 작성하고 저장합니다. 기본 실행은 이 파일을 자동으로 읽으므로
+별도 환경변수나 실행 옵션을 지정할 필요가 없습니다.
+
+```yaml
+subagents:
+  model: gpt-6.1-sol
+  force: true
+ouroboros:
   model: claude-sonnet-5-5
 ```
+
+이 PC의 Ouroboros만 Sonnet으로 고정하려면 위 예제에서 `ouroboros` 섹션만 작성하면 됩니다.
+다른 PC에서는 각자 원하는 등록 모델 ID를 지정하세요. 자동 압축 모델도 바꾸려면 로컬에
+`compaction: { model: gpt-6-luna }`처럼 추가합니다. 공통 파일에 기능별 설명과 모델 ID 안내가 있습니다.
+
+공통 파일을 먼저 읽고 **로컬에 적은 키만 덮어씁니다**. 이 예에서는 압축 설정은 공통
+기본값을 따릅니다. `subagents.force`만 적거나 `model`만 적을 수도 있고, 명시한
+`false`와 `inherit`도 적용됩니다. 빈 로컬 파일이나 `{}`는 덮어쓰기 없음입니다.
+공통 파일을 직접 수정하지 않으면 새 knob·주석·지정하지 않은 기본값은 `git pull`로
+받으면서 PC별 값을 유지할 수 있습니다. 새 기능은 공통 기본값을 제공하며 기존 키 삭제·
+이름 변경이나 모델 등록 해제에 따른 설정 오류는 수정이 필요합니다.
 
 | 항목 | 적용 범위 | 모델을 선택했을 때 |
 | --- | --- | --- |
@@ -244,20 +286,32 @@ ouroboros:
 | `compaction` | 자동 압축·`/compact`의 요약 요청 | 공식 `compaction` 요청 헤더를 보고 해당 요청만 라우팅 |
 | `ouroboros` | Ouroboros의 인터뷰·명확화 기본 모델, Claude Code backend | `OUROBOROS_CLARIFICATION_MODEL`과 `OUROBOROS_PIN_MODELS=1` 설정 |
 
-예를 들어 `subagents.model: gpt-6.1-sol`, `subagents.force: true`로 설정하면 메인 모델과
-압축·Ouroboros 설정을 유지하면서 일반 서브에이전트를 GPT로 보냅니다.
-파일 수정 후 **새 `claude-sub` 실행부터** 적용됩니다. 확장 기능을 처음 설치할 때는
-`npm run build`와 `claude-sub-router restart`가 필요하며, 이후 이 YAML만 변경할 때는
-라우터 재시작이 필요하지 않습니다. `claude-sub --check`의 `model_policy`로 확인하세요.
-파일이 없는 이전 설치와 기존 최상위 `model`/`force` 형식도 지원합니다.
-기존 형식과 새 섹션을 한 파일에서 함께 사용하면 오류로 처리합니다.
+위 로컬 예제는 메인 모델·공통 압축 설정·로컬 Ouroboros 선택을 유지하면서
+일반 서브에이전트를 GPT로 보냅니다.
+로컬 파일 수정 후 **새 `claude-sub` 실행부터** 적용되며 라우터 재시작은 필요하지 않습니다.
+코드를 업데이트했다면 `npm run build`로 반영하고 `claude-sub --check`의 `model_policy`에서
+최종 병합값을 확인하세요.
+
+```bash
+claude-sub --check
+claude-sub
+```
+
+설치·재설치·삭제는 로컬 파일을 덮어쓰거나 삭제하지 않습니다.
+폴더를 지우고 재클론할 때 보존할 키 파일과 로컬 YAML은 먼저 별도로 보관하세요.
+새 clone/Release에는 PC별 선택이 없으므로 필요한 값만 새 로컬 파일에 작성합니다.
+기존 PC에서 공통 `subagents.yaml`을 수정했다면 해당 값을 먼저 로컬 파일로 옮기고,
+공통 파일을 저장소 기본값으로 되돌린 뒤 업데이트하세요. 전환 이후 PC별 값은 로컬 파일에서만
+수정하면 그 값 때문에 공통 파일의 pull이 충돌하지 않습니다.
+기존 최상위 `model`/`force` 형식은 공통 파일과 아래 명시적 파일 선택에서만 지원합니다.
+로컬 파일은 섹션형만 사용하며, 기존 형식과 새 섹션을 한 파일에서 혼합하면 오류입니다.
 
 | 목적 | Claude Code 공식 설정 | 이 프로젝트의 설정 위치 |
 | --- | --- | --- |
 | 새 세션 기본 모델 | `ANTHROPIC_DEFAULT_MODEL` | `config/providers/*.yaml`의 `default: true` |
 | 현재 메인 모델 | `--model`, `/model`, `ANTHROPIC_MODEL`, `model` | 기본값은 위 YAML, 실행별 변경은 `--model` |
-| 서브에이전트 기본 모델 | `CLAUDE_CODE_SUBAGENT_MODEL` | `config/subagents.yaml`의 `subagents.model` |
-| 서브 모델 강제 적용 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` | 같은 파일의 `subagents.force: true` |
+| 서브에이전트 기본 모델 | `CLAUDE_CODE_SUBAGENT_MODEL` | `config/subagents.local.yaml`의 `subagents.model` |
+| 서브 모델 강제 적용 | `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` | 같은 로컬 파일의 `subagents.force: true` |
 | 개별 에이전트 모델 | `.claude/agents/*.md`, `~/.claude/agents/*.md`의 `model`, `--agents` | 기존 에이전트 정의 |
 | 모델 별칭 해석 | `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, `ANTHROPIC_DEFAULT_HAIKU_MODEL` 등 | 이번 변경에서 지정하지 않음 |
 
@@ -285,7 +339,8 @@ Ouroboros 0.59.5에서 Sonnet 5.5 API 키를 사용한 인터뷰·명확화 생�
 
 Ouroboros의 `inherit`는 메인 Sonnet 모델을 그대로 상속한다는 뜻이 아닙니다.
 플러그인이 `opus` 등 라우터에 등록되지 않은 모델을 선택하면 `400 Unknown model`로
-실패하므로 인터뷰 모델을 등록 ID로 명시합니다. API 키 사용 시 표시되는 claude.ai
+실패할 수 있습니다. 이를 피하려면 로컬 파일에 `ouroboros.model: claude-sonnet-5-5`처럼
+등록 ID를 명시하세요. API 키 사용 시 표시되는 claude.ai
 connectors 비활성 경고만으로 인증 실패를 판단하지 마세요. 실제 응답 오류를 확인하세요.
 
 Claude Code 업데이트 후 Ouroboros가 실행 파일을 찾지 못하면, Ouroboros의
@@ -294,14 +349,16 @@ Claude Code 업데이트 후 Ouroboros가 실행 파일을 찾지 못하면, Our
 
 YAML의 덮어쓰기는 `claude-sub` 자식 프로세스에만 적용합니다.
 원본 `claude`의 설정 파일이나 전역 셸은 수정하지 않습니다.
-별도 파일을 실행 한 번에만 선택하려면 다음처럼 사용합니다.
+별도 파일 하나를 실행 한 번에만 선택하려면 다음처럼 사용합니다. 이 명시적 선택에서는
+공통·자동 로컬 파일을 합치지 않으며 생략한 항목에는 코드 기본값(`inherit`/`false`)을 씁니다.
 
 ```bash
 CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub --check
 CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub
 ```
 
-잘못된 YAML, 등록되지 않은 모델 ID, 누락된 명시적 파일 경로는 실행 전에 거부합니다.
+잘못된 YAML, 중복 키, 알 수 없는 키, 잘못된 타입, 등록되지 않은 모델 ID와 누락된
+명시적 파일 경로는 실행 전에 거부합니다. 로컬 오류를 무시하고 공통값으로 대체하지 않습니다.
 키 누락이나 Provider 오류를 다른 모델로 자동 대체하지 않습니다.
 모델 선택과 해당 모델의 Artifact 도구·압축·플러그인 호환성은 별도 검증 대상입니다.
 
@@ -658,6 +715,8 @@ npm run benchmark
 | --- | --- | --- |
 | `.github/workflows/` | 포함 | CI와 GitHub Release 자동화 설정. 런타임 배포 파일과 Docker 빌드 컨텍스트에서는 제외 |
 | `src/`, `config/providers/`, `scripts/`, `tests/`, 패키지·설치 설정 | 포함 | 소스·공유 설정·빌드·검증에 필요. 런타임에 필요한 파일만 배포 허용 목록에 포함 |
+| `config/subagents.yaml` | 포함 | 모든 PC에 배포하는 공통 모델 기본값·설명 |
+| `config/subagents.local.yaml` | 제외 | PC별 모델 선택. 각 PC에서 직접 관리하며 Release/npm에도 포함하지 않음 |
 | `.serena/`, `.claude/`, `.claude-sub/`, `.codex/`, `.agents/` | 제외 | 로컬 개발 도구의 설정·캐시·작업 데이터 |
 | `temp/` | 제외 | PC 이식용 대화 기록과 로컬 인수인계 패키지 |
 | `node_modules/`, `dist/`, `artifacts/`, `coverage/` | 제외 | 의존성과 생성 결과. 배포 압축 파일은 GitHub Release 자산으로 게시 |

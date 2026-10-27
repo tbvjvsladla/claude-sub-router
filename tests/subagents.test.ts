@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ConfigError, loadRegistry } from '../src/config.ts';
+import { ConfigError, loadRegistry, ROOT } from '../src/config.ts';
 import { buildLaunchConfig } from '../src/launcher.ts';
 import { assertModelPolicyVersion, assertSubagentVersion, COMPACTION_MODEL_HEADER, defaultModelPolicy, loadModelPolicy, loadSubagentConfig } from '../src/subagents.ts';
 
@@ -45,9 +45,9 @@ test('subagent overrides keep main model, profile, caller environment and settin
   assert.deepEqual(inherited, original);
 });
 
-test('feature policy reads three independent models, with a pinned Sonnet interview and legacy YAML compatibility', () => {
+test('shared feature defaults are inherit and explicit policy files retain legacy compatibility', () => {
   const registry = loadRegistry();
-  assert.deepEqual(loadModelPolicy(registry), { ...defaultModelPolicy(), ouroboros: { model: 'claude-sonnet-5-5' } });
+  assert.deepEqual(loadModelPolicy(registry, { path: join(ROOT, 'config/subagents.yaml') }), defaultModelPolicy());
   const root = mkdtempSync(join(tmpdir(), 'claude-sub-policy-'));
   const path = join(root, 'policy.yaml');
   try {
@@ -70,6 +70,95 @@ test('feature policy reads three independent models, with a pinned Sonnet interv
       writeFileSync(path, source);
       assert.throws(() => loadModelPolicy(registry, { path }), ConfigError, source);
     }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('local policy overrides individual keys, including false and inherit, while shared changes remain visible', () => {
+  const registry = loadRegistry();
+  const root = mkdtempSync(join(tmpdir(), 'claude-sub-local-policy-'));
+  const directory = join(root, 'config');
+  const shared = join(directory, 'subagents.yaml');
+  const local = join(directory, 'subagents.local.yaml');
+  mkdirSync(directory);
+  const source = 'subagents:\n  model: deepseek-flash\n  force: true\ncompaction:\n  model: gpt-6-luna\nouroboros:\n  model: claude-sonnet-5-5\n';
+  try {
+    writeFileSync(shared, source);
+    const baseline = loadModelPolicy(registry, { root });
+    writeFileSync(local, 'subagents:\n  force: false\n');
+    assert.deepEqual(loadModelPolicy(registry, { root }), { ...baseline, subagents: { model: 'deepseek-flash', force: false } });
+    writeFileSync(local, 'subagents:\n  model: inherit\ncompaction:\n  model: inherit\nouroboros:\n  model: inherit\n');
+    assert.deepEqual(loadModelPolicy(registry, { root }), { ...defaultModelPolicy(), subagents: { model: 'inherit', force: true } });
+    const override = 'subagents:\n  model: gpt-6.1-sol\n';
+    writeFileSync(local, override);
+    assert.deepEqual(loadModelPolicy(registry, { root }), { ...baseline, subagents: { model: 'gpt-6.1-sol', force: true } });
+    writeFileSync(shared, source.replace('gpt-6-luna', 'deepseek-pro').replace('force: true', 'force: false'));
+    assert.deepEqual(loadModelPolicy(registry, { root }), {
+      subagents: { model: 'gpt-6.1-sol', force: false }, compaction: { model: 'deepseek-pro' }, ouroboros: baseline.ouroboros,
+    });
+    assert.equal(readFileSync(local, 'utf8'), override);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('missing and empty local policies keep shared defaults and local-only installations use code defaults', () => {
+  const registry = loadRegistry();
+  const root = mkdtempSync(join(tmpdir(), 'claude-sub-empty-policy-'));
+  const directory = join(root, 'config');
+  const local = join(directory, 'subagents.local.yaml');
+  mkdirSync(directory);
+  try {
+    writeFileSync(local, 'ouroboros:\n  model: claude-sonnet-5-5\n');
+    assert.deepEqual(loadModelPolicy(registry, { root }), { ...defaultModelPolicy(), ouroboros: { model: 'claude-sonnet-5-5' } });
+    writeFileSync(join(directory, 'subagents.yaml'), 'compaction:\n  model: gpt-6-luna\n');
+    const expected = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
+    for (const source of ['', '# No overrides\n', '{}', 'subagents: {}\ncompaction: {}\nouroboros: {}\n']) {
+      writeFileSync(local, source);
+      assert.deepEqual(loadModelPolicy(registry, { root }), expected, source);
+    }
+    rmSync(local);
+    assert.deepEqual(loadModelPolicy(registry, { root }), expected);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('invalid local policies fail with their own path and cannot hide invalid shared policies', () => {
+  const registry = loadRegistry();
+  const root = mkdtempSync(join(tmpdir(), 'claude-sub-invalid-local-'));
+  const directory = join(root, 'config');
+  const shared = join(directory, 'subagents.yaml');
+  const local = join(directory, 'subagents.local.yaml');
+  mkdirSync(directory);
+  try {
+    writeFileSync(shared, 'ouroboros:\n  model: inherit\n');
+    for (const source of [
+      'null', '[]', 'unknown: {}', 'subagents: null', 'subagents: []', 'subagents: false',
+      'subagents:\n  model: missing', 'subagents:\n  model: ""', 'subagents:\n  model: 3',
+      'subagents:\n  force: "false"', 'subagents:\n  force: null', 'subagents:\n  force: true\n  force: false',
+      'subagents:\n  extra: true', 'compaction:\n  force: false', 'ouroboros:\n  model: missing',
+      'ouroboros:\n  model: inherit\nouroboros:\n  model: gpt-6-luna', 'model: inherit\nforce: false', 'subagents: [',
+    ]) {
+      writeFileSync(local, source);
+      assert.throws(() => loadModelPolicy(registry, { root }), error => error instanceof ConfigError && error.message.startsWith(local), source);
+    }
+    writeFileSync(local, 'ouroboros:\n  model: claude-sonnet-5-5\n');
+    writeFileSync(shared, 'ouroboros:\n  model: missing\n');
+    assert.throws(() => loadModelPolicy(registry, { root }), error => error instanceof ConfigError && error.message.startsWith(shared));
+    writeFileSync(shared, 'ouroboros:\n  model: inherit\n');
+    rmSync(local); mkdirSync(local);
+    assert.throws(() => loadModelPolicy(registry, { root }), /subagents\.local\.yaml: could not read model policy/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('explicit policy paths select one file without applying shared or per-PC files', () => {
+  const registry = loadRegistry();
+  const root = mkdtempSync(join(tmpdir(), 'claude-sub-explicit-policy-'));
+  const directory = join(root, 'config');
+  const path = join(root, 'selected.yaml');
+  mkdirSync(directory);
+  try {
+    writeFileSync(join(directory, 'subagents.yaml'), 'invalid: true');
+    writeFileSync(join(directory, 'subagents.local.yaml'), 'invalid: true');
+    writeFileSync(path, 'compaction:\n  model: gpt-6-luna\n');
+    assert.deepEqual(loadModelPolicy(registry, { root, path }), { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } });
+    assert.throws(() => loadModelPolicy(registry, { root, path: join(root, 'missing.yaml') }), /could not read model policy/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
