@@ -1,0 +1,46 @@
+provider:
+  id: zai
+  name: Z.ai Coding Plan
+  protocol: anthropic
+  # Coding Plan's Anthropic endpoint, not the standard model API endpoint.
+  base_url: https://api.z.ai/api/anthropic
+  api_key_env: ZAI_API_KEY
+  api_key_header: authorization
+
+models:
+  - id: glm-5.3
+    upstream_model: glm-5.3
+    display_name: GLM-5.3
+    description: Z.ai Coding Plan · GLM-5.3 · 1M Context
+
+    context:
+      window: 1000000
+      auto_compact_threshold: 800000
+
+    # Both models require thinking and support low/high/max.
+    # https://docs.z.ai/devpack/latest-model
+    reasoning: &zai_reasoning
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        # Coding Plan downgrades off to low; router none means fully off.
+        none: { action: error }
+        low: low
+        medium: high
+        high: high
+        xhigh: max
+        max: max
+      unsupported_level: error
+
+  - id: glm-5.3-flash
+    upstream_model: glm-5.3-flash
+    display_name: GLM-5.3 Flash
+    description: Z.ai Coding Plan · GLM-5.3 Flash · 1M Context
+
+    context:
+      window: 1000000
+      auto_compact_threshold: 800000
+
+    reasoning: *zai_reasoning

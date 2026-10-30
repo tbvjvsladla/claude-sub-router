@@ -305,6 +305,8 @@ test('six reasoning levels and the thinking toggle use each provider policy over
     'kimi-k3.1-pro': [null, 'low', 'high', 'high', 'max', 'max'],
     'minimax-m3': [null, null, null, null, null, null],
     'minimax-m3.1-flash': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'glm-5.3': [null, 'low', 'high', 'high', 'max', 'max'],
+    'glm-5.3-flash': [null, 'low', 'high', 'high', 'max', 'max'],
   };
   try {
     for (const [modelId, wireEfforts] of Object.entries(expected)) {
@@ -316,7 +318,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const before = calls.length;
             const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_OAUTH' }, body: JSON.stringify(body) });
             const none = toggleOff || effort === 'none';
-            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro'].includes(modelId);
+            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash'].includes(modelId);
             assert.equal(response.status, unsupported ? 400 : 200, `${modelId} ${effort} ${path} toggleOff=${toggleOff}`);
             const result = await response.text();
             if (unsupported) {

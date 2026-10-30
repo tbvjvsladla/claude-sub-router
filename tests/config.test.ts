@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { stringify } from 'yaml';
-import { ConfigError, getDefaultModel, loadRegistry, REASONING_LEVELS, validateReasoning } from '../src/config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry, REASONING_LEVELS, validateReasoning } from '../src/config.ts';
 import type { Model } from '../src/config.ts';
 import { buildSettings } from '../src/settings.ts';
 import { buildLaunchConfig } from '../src/launcher.ts';
@@ -70,6 +70,25 @@ test('MiniMax M3.1 Flash maps positive efforts and rejects thinking off before s
     assert.throws(() => applyReasoning({ ...body, thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
   }
   assert.throws(() => applyReasoning({ output_config: { effort: 'none' } }, model), /does not support reasoning effort: none/);
+});
+
+test('Z.ai models share Coding Plan settings and require reasoning', () => {
+  const registry = loadRegistry();
+  const settings = buildSettings({}, registry);
+  assert.ok(isObject(settings.modelSettings));
+  for (const id of ['glm-5.3', 'glm-5.3-flash']) {
+    const entry = registry.get(id);
+    assert.ok(entry);
+    assert.equal(entry.provider.id, 'zai');
+    assert.equal(entry.provider.base_url, 'https://api.z.ai/api/anthropic');
+    assert.equal(entry.provider.api_key_env, 'ZAI_API_KEY');
+    assert.equal(entry.provider.api_key_header, 'authorization');
+    assert.equal(entry.model.upstream_model, id);
+    assert.deepEqual(entry.model.context, { window: 1000000, auto_compact_threshold: 800000 });
+    assert.ok(entry.model.reasoning);
+    assert.deepEqual(entry.model.reasoning.mapping, { none: { action: 'error' }, low: 'low', medium: 'high', high: 'high', xhigh: 'max', max: 'max' });
+    assert.deepEqual(settings.modelSettings[id], { autoCompactWindow: 800000 });
+  }
 });
 
 test('registry rejects duplicates, unknown fields and invalid types', () => {
@@ -170,7 +189,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro'].includes(model.id);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
