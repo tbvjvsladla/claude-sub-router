@@ -1,0 +1,31 @@
+provider:
+  id: meta
+  name: Meta Model API
+  protocol: anthropic
+  base_url: https://api.meta.ai
+  api_key_env: META_API_KEY
+  api_key_header: authorization
+
+models:
+  - id: muse-wonder-1.0
+    upstream_model: muse-wonder-1.0
+    display_name: Muse Wonder
+    description: Meta Model API · 1M Context
+
+    context:
+      window: 1048576
+      auto_compact_threshold: 800000
+
+    reasoning:
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        none: { action: error }
+        low: low
+        medium: medium
+        high: high
+        xhigh: xhigh
+        max: max
+      unsupported_level: error

@@ -189,7 +189,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash'].includes(model.id);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
@@ -206,10 +206,27 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
   }
 });
 
+test('model picker groups providers in display order while preserving each provider’s YAML order', () => {
+  const registry = loadRegistry();
+  const settings = buildSettings({}, registry);
+  const expected = [
+    'claude-sonnet-5-5', 'deepseek-pro', 'deepseek-flash', 'kimi-k3.1-pro',
+    'minimax-m3.1-flash', 'minimax-m3', 'glm-5.3', 'glm-5.3-flash',
+    'muse-wonder-1.0', 'gpt-6.1-sol', 'gpt-6-luna',
+  ];
+  assert.deepEqual(settings.availableModels, expected);
+  assert.equal(settings.model, 'claude-sonnet-5-5');
+  const picker = settings.modelPicker as { options: { model: string; label: string }[] };
+  assert.deepEqual(picker.options.map(option => option.model), expected);
+  const muse = picker.options.find(option => option.model === 'muse-wonder-1.0');
+  assert.ok(muse);
+  assert.equal(muse.label, 'Muse Wonder');
+});
+
 test('settings and launcher preserve the native profile and apply routing only to the child', () => {
   const registry = loadRegistry();
   const existing = { unrelated: true, model: 'kimi-k3.1-pro', modelSettings: { 'kimi-k3.1-pro': { unrelated: 'keep' } } };
-  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
+  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', META_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
   const original = structuredClone({ existing, inherited });
   const { environment, settings } = buildLaunchConfig(registry, existing, inherited);
   assert.equal(settings.model, 'claude-sonnet-5-5');

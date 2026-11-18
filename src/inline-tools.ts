@@ -67,9 +67,9 @@ function flattenKimiTools(body: JsonObject): JsonObject {
 }
 
 export function applyInlineToolCompatibility(body: JsonObject, provider: Provider): JsonObject {
-  if (provider.id === 'openrouter-openai' && Array.isArray(body.tools)) {
+  if (['openrouter-openai', 'meta'].includes(provider.id) && Array.isArray(body.tools)) {
     // Claude reserves this non-callable sentinel even when no tool search is
-    // enabled. OpenRouter treats it as a real deferred tool and rejects the
+    // enabled. These providers treat it as a real deferred tool and reject the
     // request without a search tool. Keep real deferred tools and search intact.
     const tools = body.tools.filter(tool => !(isObject(tool) && tool.name === 'DeferredToolPlaceholder' &&
       tool.defer_loading === true &&

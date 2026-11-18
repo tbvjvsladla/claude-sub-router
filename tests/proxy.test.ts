@@ -10,6 +10,7 @@ import { createRouterServer } from '../src/proxy.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from '../src/subagents.ts';
 import type { JsonObject } from '../src/config.ts';
 import { assertRouterCompatibility } from '../src/launcher.ts';
+import { applyMetaMessagesCompatibility } from '../src/meta-messages.ts';
 import { defaultModelPolicy } from '../src/subagents.ts';
 
 async function listen(server: Server): Promise<string> {
@@ -25,7 +26,7 @@ test('concurrent native login and API sessions retain their credentials, includi
   const logs: unknown[] = [];
   let status = 200;
   const proxy = createRouterServer(loadRegistry(), {
-    environment: { ANTHROPIC_API_KEY: 'FAKE_UNUSED_SERVER_KEY', DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK_KEY' },
+    environment: { ANTHROPIC_API_KEY: 'FAKE_UNUSED_SERVER_KEY', DEEPSEEK_API_KEY: 'FAKE_DEEPSEEK_KEY', META_API_KEY: 'FAKE_META_KEY' },
     fetch: async (input, init) => {
       calls.push({ url: String(input), model: JSON.parse(String(init?.body)).model, headers: new Headers(init?.headers) });
       return Response.json({ type: status === 200 ? 'message' : 'error' }, { status });
@@ -58,6 +59,14 @@ test('concurrent native login and API sessions retain their credentials, includi
     assert.equal(calls.at(-1)!.headers.get('x-api-key'), 'FAKE_DEEPSEEK_KEY');
     assert.equal(calls.at(-1)!.headers.has('authorization'), false);
     assert.equal(calls.at(-1)!.headers.get('anthropic-beta'), 'test-feature');
+    for (const path of ['/v1/messages', '/v1/messages/count_tokens']) {
+      assert.equal(await send({ 'x-api-key': 'FAKE_CLIENT_KEY', authorization: 'Bearer FAKE_LOGIN_TOKEN' }, path, 'muse-wonder-1.0'), 200);
+      const meta = calls.at(-1)!;
+      assert.equal(meta.url, `https://api.meta.ai${path}`);
+      assert.equal(meta.model, 'muse-wonder-1.0');
+      assert.equal(meta.headers.get('authorization'), 'Bearer FAKE_META_KEY');
+      assert.equal(meta.headers.has('x-api-key'), false);
+    }
     const before = calls.length;
     status = 401;
     assert.equal(await send({ 'x-api-key': 'FAKE_CLIENT_KEY' }), 401);
@@ -307,6 +316,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
     'minimax-m3.1-flash': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
     'glm-5.3': [null, 'low', 'high', 'high', 'max', 'max'],
     'glm-5.3-flash': [null, 'low', 'high', 'high', 'max', 'max'],
+    'muse-wonder-1.0': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
   };
   try {
     for (const [modelId, wireEfforts] of Object.entries(expected)) {
@@ -318,7 +328,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const before = calls.length;
             const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_OAUTH' }, body: JSON.stringify(body) });
             const none = toggleOff || effort === 'none';
-            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash'].includes(modelId);
+            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(modelId);
             assert.equal(response.status, unsupported ? 400 : 200, `${modelId} ${effort} ${path} toggleOff=${toggleOff}`);
             const result = await response.text();
             if (unsupported) {
@@ -330,7 +340,8 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const wire = calls.at(-1)!;
             const wireEffort = wireEfforts[none ? 0 : index];
             assert.deepEqual(wire.output_config, wireEffort === null ? { format: body.output_config.format } : { effort: wireEffort, format: body.output_config.format });
-            assert.deepEqual(wire.thinking, none && modelId !== 'gpt-6-luna' ? { type: 'disabled' } : body.thinking);
+            const thinking = modelId === 'muse-wonder-1.0' ? { ...body.thinking, display: 'summarized' } : body.thinking;
+            assert.deepEqual(wire.thinking, none && modelId !== 'gpt-6-luna' ? { type: 'disabled' } : thinking);
             assert.deepEqual(wire.messages, body.messages);
             assert.deepEqual(wire.tools, body.tools);
             assert.equal(wire.model, registry.get(modelId)!.model.upstream_model);
@@ -339,6 +350,28 @@ test('six reasoning levels and the thinking toggle use each provider policy over
       }
     }
   } finally { await close(proxy); }
+});
+
+test('Meta downgrades one-hour cache controls without changing tool input or the caller’s request', () => {
+  const cache_control = { type: 'ephemeral', ttl: '1h' };
+  const text = { type: 'text', text: 'Read result', cache_control };
+  const toolUse = { type: 'tool_use', name: 'Read', input: { cache_control } };
+  const body = {
+    cache_control, system: [text], tools: [{ name: 'Read', cache_control }],
+    messages: [
+      { role: 'assistant', content: [toolUse] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool_id', content: [text] }] },
+    ],
+    thinking: { type: 'adaptive', display: 'omitted' },
+  };
+  const original = structuredClone(body);
+  const shortCache = { type: 'ephemeral', ttl: '5m' };
+  const normalizedText = { ...text, cache_control: shortCache };
+  assert.deepEqual(applyMetaMessagesCompatibility(body), {
+    ...body, cache_control: shortCache, system: [normalizedText], tools: [{ name: 'Read', cache_control: shortCache }],
+    messages: [body.messages[0], { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool_id', content: [normalizedText] }] }],
+  });
+  assert.deepEqual(body, original);
 });
 
 test('SSE streams immediately with backpressure and cancels upstream on disconnect', async () => {

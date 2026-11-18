@@ -3,6 +3,16 @@ import { join } from 'node:path';
 import { ConfigError, ROOT, getDefaultModel, isObject } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
 
+const PROVIDER_PICKER_ORDER = new Map([
+  ['anthropic', 0],
+  ['deepseek', 1],
+  ['kimi', 2],
+  ['minimax', 3],
+  ['zai', 4],
+  ['meta', 5],
+  ['openrouter-openai', 6],
+]);
+
 export function readSettings(root = ROOT): JsonObject {
   const legacy = join(root, 'config/claude-test.json');
   const path = existsSync(legacy) ? legacy : join(root, 'config/claude-settings.json');
@@ -19,9 +29,13 @@ export function buildSettings(existing: JsonObject, registry: Registry): JsonObj
   if (!isObject(picker) || !isObject(modelSettings)) throw new ConfigError('modelPicker and modelSettings must be objects');
   const selected = settings.model;
   settings.model = getDefaultModel(registry) ?? (typeof selected === 'string' && registry.has(selected) ? selected : registry.keys().next().value);
-  settings.availableModels = [...registry.keys()];
+  const orderedModels = [...registry.entries()].toSorted(([, left], [, right]) =>
+    (PROVIDER_PICKER_ORDER.get(left.provider.id) ?? PROVIDER_PICKER_ORDER.size) -
+    (PROVIDER_PICKER_ORDER.get(right.provider.id) ?? PROVIDER_PICKER_ORDER.size),
+  );
+  settings.availableModels = orderedModels.map(([model]) => model);
   picker.replaceBuiltInOptions = true;
-  picker.options = [...registry.entries()].map(([model, entry]) => ({
+  picker.options = orderedModels.map(([model, entry]) => ({
     model, label: entry.model.display_name, description: entry.model.description ?? entry.provider.name,
   }));
   settings.modelPicker = picker;

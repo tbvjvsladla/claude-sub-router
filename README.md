@@ -1,7 +1,7 @@
 # claude-sub
 
 기존 `claude` 명령의 로그인·플러그인·대화 기록을 공유하면서 `claude-sub`에서
-Sonnet(기존 로그인 또는 Anthropic API)·DeepSeek·Kimi·MiniMax M3/M3.1 Flash·OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
+Sonnet 5.5, DeepSeek, Kimi, MiniMax, Z.ai GLM, Meta Muse Wonder, OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
@@ -50,7 +50,7 @@ PC마다 서브에이전트·압축·Ouroboros 모델을 다르게 쓰려면 설
 로컬 파일은 자동으로 읽으며, 파일이 없으면 세 기능 모두 `inherit`로 실행됩니다.
 
 `envs/.env.example`에 `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, `MINIMAX_API_KEY`,
-`OPENROUTER_API_KEY`, 선택 항목인 `ANTHROPIC_API_KEY` 칸이 있습니다.
+`ZAI_API_KEY`, `META_API_KEY`, `OPENROUTER_API_KEY`, 선택 항목인 `ANTHROPIC_API_KEY` 칸이 있습니다.
 MiniMax M3와 M3.1 Flash는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
@@ -79,7 +79,7 @@ envs/
 파일명이나 국가명은 모델 연결에 영향을 주지 않습니다. `config/providers/*.yaml`의
 `provider.api_key_env`와 변수 이름이 일치해야 합니다. 예를 들어 `DEEPSEEK_API_KEY`는
 DeepSeek 모델, `MOONSHOT_API_KEY`는 Kimi 모델에서 참조합니다. 키를 추가하는 것만으로
-새 모델이 등록되지는 않습니다. Meta 등 다른 Provider도 지원하려면 별도 YAML과
+새 모델이 등록되지는 않습니다. 다른 Provider도 지원하려면 별도 YAML과
 현재 라우터가 지원하는 Anthropic 호환 API가 필요합니다.
 
 - 시작할 때 `envs/` 바로 아래의 `*.env` 파일을 파일명 순서로 읽습니다. 하위 폴더,
@@ -201,16 +201,20 @@ Sonnet의 `-p` 호출에 API 키를 전달합니다. `api_key_source`가 `provid
 프로젝트 키 파일에서, `inherited_environment`이면 실행한 셸 환경에서 가져온 키입니다.
 키를 추가한 뒤에는 실행 중인 대화형 세션도 새로 시작하세요.
 
-| 실행 | 프로젝트 Anthropic 키 있음 | 프로젝트 키 없음 또는 빈 값 |
+아래 표는 기존 Claude 로그인이 활성 상태이며 다른 인증 수단을 별도로 설정하지 않은 경우에 적용됩니다.
+
+| 실행 | `ANTHROPIC_API_KEY` 있음 | 키가 없거나 비어 있음 |
 | --- | --- | --- |
-| `claude-sub -p`의 Sonnet(기본 모델·`sonnet`·등록 ID) | API 키 사용 | Claude Code의 기존 인증 선택 |
-| 대화형 `claude-sub`의 Sonnet | Claude Code의 키 승인·거절 정책 적용 | Claude Code의 기존 인증 선택 |
-| `claude`, `claude -p` | 기존 Claude Code 설정·셸 환경에 따름 | 기존 Claude Code 설정·셸 환경에 따름 |
+| `claude-sub -p`의 Sonnet(기본 모델·`sonnet`·등록 ID) | 승인 창 없이 API 키 사용 | 기존 Claude 로그인 사용 |
+| 대화형 `claude-sub`의 Sonnet | 키 사용을 승인하면 API 키 사용, 거절하면 기존 Claude 로그인 사용 | 기존 Claude 로그인 사용 |
 
 대화형에서는 Claude Code가 키 사용을 한 번 확인하고 선택을 기억합니다.
-설치된 버전의 `/config`에서 “Use custom API key”를 변경하고 `/status`에서 실제
-인증을 확인할 수 있습니다. `-p`는 키가 있으면 승인 창 없이 API를 사용합니다.
-이 동작은 [Claude Code 공식 인증 우선순위](https://code.claude.com/docs/en/authentication#authentication-precedence)를 계승합니다.
+키를 추가한 뒤에도 로그인으로 호출되면 `/config`에서 **Use custom API key**를 켜고,
+`/status`에서 현재 인증 방식을 확인하세요. 이 옵션은 세션에 키가 전달됐을 때 표시됩니다.
+대화형에서 기존 로그인을 사용하려면 같은 옵션을 끄면 됩니다. `envs/anthropic.env`의 키는
+그대로 두고 `claude-sub -p`의 API 호출에 사용할 수 있습니다.
+[Claude Code 공식 인증 우선순위](https://code.claude.com/docs/en/authentication#authentication-precedence)
+
 라우터는 요청에 담긴 API 키 또는 Bearer 인증을 전달하며, 서버에 키가 있다는
 이유로 구독 요청을 API로 바꾸지 않습니다. 잘못된 키·잔액 부족 등 API 오류가 나도
 구독 인증으로 자동 전환하지 않습니다. `ANTHROPIC_API_KEY`와 기존
@@ -371,6 +375,13 @@ CLAUDE_SUB_SUBAGENT_CONFIG=/path/to/subagents.yaml claude-sub
 API 키는 기본적으로 `x-api-key` 헤더로 전송합니다. Bearer 인증 게이트웨이는
 `provider.api_key_header: authorization`을 지정하면 등록된 Provider 키로
 `Authorization: Bearer ...`를 만듭니다. Claude 구독 토큰을 대신 보내지 않습니다.
+
+`/model`에는 기본 Sonnet 다음으로 DeepSeek → Kimi → MiniMax → Z.ai → Meta → OpenRouter 순으로 표시됩니다.
+Meta Muse Wonder(`muse-wonder-1.0`)는 `META_API_KEY`가 필요합니다.
+Muse Wonder Full은 Muse Code 구독에서만 제공됩니다. Meta는 현재 한국에서 두 모델의
+사용을 지원하지 않는다고 안내합니다. [Meta 모델 가용성](https://dev.meta.ai/docs/muse-wonder#availability)
+
+Meta 모델을 호출할 때 Claude Code의 1시간 프롬프트 캐시 요청은 5분으로, reasoning 업데이트 요청은 요약으로 변환합니다.
 
 ```yaml
 reasoning:
@@ -686,6 +697,18 @@ SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 특히 `costBasis: unknown`인 커스텀 모델에서는 Provider의 실제 청구액과 다를 수 있습니다.
 
 ### 최근 검증 결과
+
+**2026-11-18 · Meta Muse Wonder 및 모델 메뉴 순서 업데이트**
+
+- `META_API_KEY`를 사용하는 Muse Wonder를 추가하고 `/model`에서 GLM 다음, OpenRouter GPT 앞에
+  표시되도록 했습니다. 실제 대화형 메뉴에서 순서와 선택을 확인했습니다.
+- Claude Code **2.1.325**에서 Sonnet의 키 유무와 실행 모드를 조합해 실제 Read 호출과 응답을 확인했습니다.
+  `-p`는 키가 있으면 API 키를, 키가 없으면 기존 로그인을 사용했습니다. 시험 프로필의 대화형 세션은
+  키 거절 선택이 저장돼 있어 두 경우 모두 기존 로그인을 사용했습니다. 키 없는 검증은 기존 키 파일을
+  보존한 격리 환경에서 수행했습니다.
+- 오프라인 테스트 67건, 타입 검사와 빌드가 통과했습니다. Muse Wonder는 요청 형식 수정 후에도
+  검증에 사용한 Meta 프로젝트에서 `-p`와 대화형 모두 HTTP 404를 받았습니다. Meta 모델 목록에서
+  Muse Wonder에 접근할 수 있는 프로젝트가 실제 추론 확인의 조건입니다.
 
 2026-10-30에 Claude Code **2.1.314**, Node.js **24.15.0**, Linux/WSL2에서
 `glm-5.3`과 `glm-5.3-flash`의 Z.ai Coding Plan 연결을 확인했습니다.

@@ -108,7 +108,7 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
   const root = fixture();
   const registry = loadRegistry();
   writeFileSync(join(root, 'envs/CHINA.env'), 'MOONSHOT_API_KEY=FAKE_KIMI\nDEEPSEEK_API_KEY=FAKE_DEEPSEEK');
-  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX\nOPENROUTER_API_KEY=FAKE_OPENROUTER');
+  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX\nOPENROUTER_API_KEY=FAKE_OPENROUTER\nMETA_API_KEY=FAKE_META\nZAI_API_KEY=FAKE_ZAI');
   const { environment } = loadProviderEnvironment(registry, { root, environment: {} });
   const received: string[] = [];
   const server = createRouterServer(registry, { environment, fetch: async (_input, init) => {
@@ -123,7 +123,7 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
       if (!provider.api_key_env) continue;
       if (provider.auth === 'claude_native') continue;
       const response = await fetch(`http://127.0.0.1:${port}/v1/messages`, { method: 'POST', body: JSON.stringify({ model }) });
-      assert.equal(response.status, 200); await response.text();
+      assert.equal(response.status, 200, model); await response.text();
       assert.equal(received.at(-1), environment[provider.api_key_env]);
     }
     assert.equal(received.length, [...registry.values()].filter(({ provider }) => provider.api_key_env && provider.auth !== 'claude_native').length);
