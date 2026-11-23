@@ -54,6 +54,24 @@ PC마다 서브에이전트·압축·Ouroboros 모델을 다르게 쓰려면 설
 MiniMax M3와 M3.1 Flash는 `config/providers/minimax.yaml`로 등록되어 있으며 실제 호출에는
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
+GitHub 저장소에는 서비스별 빈 예제 `envs/china.env.example`, `envs/usa.env.example`,
+`envs/anthropic.env.example`도 있습니다. 필요한 예제만 골라 키를 입력하세요.
+예를 들어 중국 서비스 키를 입력하려면:
+
+1. `nano envs/china.env.example`로 예제를 엽니다.
+2. 사용할 서비스의 `=` 뒤에 발급받은 키를 입력합니다. 사용하지 않는 항목은 비워 둡니다.
+3. `Ctrl + O`를 누르고 `File Name to Write`에서 기존 이름을 지운 뒤
+   `envs/china.env`를 입력합니다. `Enter`로 저장하고 `Ctrl + X`로 종료합니다.
+4. `chmod 600 envs/china.env`로 키 파일의 접근 권한을 제한합니다.
+
+같은 방식으로 `usa.env.example`은 `envs/usa.env`, `anthropic.env.example`은
+`envs/anthropic.env`로 저장합니다. 원본 예제는 유지됩니다. 저장할 이름의 파일이
+이미 있으면 덮어쓰지 말고 기존 파일을 직접 편집하세요. 예제 파일은 자동으로 읽지
+않으며 실제 `*.env` 파일만 자동 로딩됩니다. 키는 그대로 입력하고 셸 명령이나
+`${VARIABLE}` 확장은 사용하지 마세요. 키 파일을 셸에서 source/export하지 마세요.
+세 서비스별 예제는 GitHub 저장소에서 제공되며 기존 릴리스·npm 패키지에는 통합
+예제 `envs/.env.example`이 포함됩니다.
+
 기존 사용자는 키 파일을 다시 만들 필요가 없습니다. 기본 설치는 `envs/*.env`를 모두
 자동으로 읽으며, 기존 `CHINA_provider.env`, `USA_provider.env` 같은 이름도 지원합니다.
 키 파일이 하나도 없으면 기존 루트 `.env`를 사용하고, 그것도 없을 때만 예제를
@@ -786,7 +804,7 @@ npm run benchmark
 | `.serena/`, `.claude/`, `.claude-sub/`, `.codex/`, `.agents/` | 제외 | 로컬 개발 도구의 설정·캐시·작업 데이터 |
 | `temp/` | 제외 | PC 이식용 대화 기록과 로컬 인수인계 패키지 |
 | `node_modules/`, `dist/`, `artifacts/`, `coverage/` | 제외 | 의존성과 생성 결과. 배포 압축 파일은 GitHub Release 자산으로 게시 |
-| 실제 `.env`·`envs/` 키 파일 | 제외 | 각 실행 환경에서 별도 관리. 값이 비어 있는 `envs/.env.example`만 공유 |
+| 실제 `.env`·`envs/` 키 파일 | 제외 | 각 실행 환경에서 별도 관리. 값이 비어 있는 예제만 공유 |
 
 Serena의 `project.yml`은 팀 설정으로 공유할 수도 있지만, 이 프로젝트에서는 `.serena/`
 전체를 로컬 도구 설정으로 취급합니다. 빌드·CI·라우터 실행에는 사용하지 않습니다.
@@ -799,7 +817,7 @@ npm run package:release
 npm run test:release
 ```
 
-`envs/.env.example`만 Git과 배포 파일에 포함합니다. 실제 `*.env`, 루트 `.env`,
+Git에는 빈 `envs/.env.example`과 세 서비스별 예제를 포함하고, 배포 파일에는 기존 통합 예제만 포함합니다. 실제 `*.env`, 루트 `.env`,
 그 밖의 `envs/` 내용, 사용자 프로필, 개인 설정, 백업, `.venv`, `node_modules`는 제외합니다.
 스캐너는 일반적인 토큰 형태를 검사하지만 모든 비밀정보를 보장하지 않으므로
 업로드 전에 staged diff를 직접 확인하세요. 실제 키를 Git에 추가하지 마세요.
