@@ -8,10 +8,10 @@ provider:
   api_key_header: authorization
 
 models:
-  - id: glm-5.3
-    upstream_model: glm-5.3
-    display_name: GLM-5.3
-    description: Z.ai Coding Plan · GLM-5.3 · 1M Context
+  - id: glm-5.4
+    upstream_model: glm-5.4
+    display_name: GLM-5.4
+    description: Z.ai Coding Plan · GLM-5.4 · 1M Context
 
     context:
       window: 1000000

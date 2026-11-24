@@ -460,7 +460,7 @@ API 클라이언트는 `output_config: { effort: none }`을 직접 보낼 수도
 | Sonnet 5.5 | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 | DeepSeek Pro / Flash | thinking 끄기 | `low` | `high` | `high` | `high` | `max` |
 | Kimi K3.1 Pro | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
-| GLM-5.3 / GLM-5.3 Flash | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
+| GLM-5.4 / GLM-5.3 Flash | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
 | MiniMax M3 | thinking 끄기 | effort 제거 | effort 제거 | effort 제거 | effort 제거 | effort 제거 |
 | MiniMax M3.1 Flash | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 
@@ -481,7 +481,7 @@ Claude Code의 최대 컨텍스트 환경변수는 안전을 위해 등록된 �
 
 ### Z.ai Coding Plan
 
-`config/providers/zai.yaml`에서 `glm-5.3`과 `glm-5.3-flash`를 등록합니다.
+`config/providers/zai.yaml`에서 `glm-5.4`와 `glm-5.3-flash`를 등록합니다.
 두 모델은 같은 3단계 추론 정책을 사용하므로 하나의 reasoning 프리셋을 공유합니다.
 `envs/CHINA_provider.env` 등 자동 로딩되는 `envs/*.env`에 `ZAI_API_KEY`를 설정하세요.
 키는 **Z.ai Coding Plan 키**여야 하며 표준 모델 API 키와 구분됩니다.
@@ -490,24 +490,25 @@ Anthropic 호환 Coding Plan 주소 `https://api.z.ai/api/anthropic`에 Bearer �
 
 ```bash
 claude-sub-router restart
-claude-sub --model glm-5.3
+claude-sub --model glm-5.4 --effort max
 claude-sub --model glm-5.3-flash -p '짧게 인사해줘' --effort low
 ```
 
 두 모델 모두 추론이 필수입니다. `medium`은 `high`, `xhigh`는 `max`로 매핑하며
-effort가 없으면 제조사 기본 `max`를 보존합니다. Coding Plan은 끄기 요청을 `low`로
+effort가 없으면 제조사 기본 `max`를 보존합니다. Z.ai는 코딩 작업에 `max`를 권장합니다.
+Coding Plan은 끄기 요청을 `low`로
 완화하지만, 라우터의 `none`은 완전한 추론 끄기를 뜻하므로 `none`·thinking 끄기는
 upstream 호출 전에 HTTP 400으로 거부합니다.
 
-공식 컨텍스트는 두 모델 모두 1,000,000토큰이고 최대 출력은 128K입니다.
-자동 압축은 출력·후속 도구 호출 여유를 두는 프로젝트 정책으로 **800,000토큰**을
-사용합니다. 제조사가 지정한 압축 권장값은 아닙니다. 이 저장소는 모델별 설정을
-생성하므로 공식 Claude Code 직접 연결 예제의 `[1m]` 접미사를 YAML의 모델 ID에
-붙이지 않습니다. 현재 공통 컨텍스트 상한은 다른 등록 모델에 맞춘 900,000토큰입니다.
-GLM-5.3은 텍스트 입력 모델이며 Flash는 멀티모달 모델입니다.
+두 모델 모두 멀티모달 모델이며 공식 컨텍스트는 1,000,000토큰, 최대 출력은 128K입니다.
+Z.ai의 Claude Code 직접 연결 예시는 `glm-5.4[1m]`과 `glm-5.3-flash[1m]`을 사용합니다.
+`claude-sub`에서는 YAML의 접미사 없는 모델 ID로 선택합니다. 자동 압축은 출력과 후속
+도구 호출 여유를 위해 **800,000토큰**으로 설정하며, 현재 공통 컨텍스트 상한은
+다른 등록 모델에 맞춘 900,000토큰입니다.
 [공식 Coding Plan 주소](https://docs.z.ai/devpack/quick-start),
+[공식 Claude Code 설정](https://docs.z.ai/devpack/tool/claude),
 [공식 Claude Code 매핑·컨텍스트 안내](https://docs.z.ai/devpack/latest-model),
-[GLM-5.3 명세](https://docs.z.ai/guides/llm/glm-5.3),
+[GLM-5.4 명세](https://docs.z.ai/guides/llm/glm-5.4),
 [GLM-5.3 Flash 명세](https://docs.z.ai/guides/vlm/glm-5.3-flash).
 
 ### Kimi Code와 DeepSeek Flash 연결 점검
@@ -728,7 +729,12 @@ SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
   검증에 사용한 Meta 프로젝트에서 `-p`와 대화형 모두 HTTP 404를 받았습니다. Meta 모델 목록에서
   Muse Wonder에 접근할 수 있는 프로젝트가 실제 추론 확인의 조건입니다.
 
-2026-10-30에 Claude Code **2.1.314**, Node.js **24.15.0**, Linux/WSL2에서
+2026-11-24에 Claude Code **2.1.331**에서 `glm-5.4`와 `glm-5.3-flash`를 검증했습니다.
+두 모델 모두 `low` effort로 실제 `claude-sub -p`의 Read·토큰 응답과 실제 PTY의
+Read·토큰 응답·키보드 후속 입력·응답·정상 종료를 통과했습니다. 관련 오프라인 검사
+38건, 타입 검사와 빌드도 통과했습니다.
+
+교체 전인 2026-10-30에 Claude Code **2.1.314**, Node.js **24.15.0**, Linux/WSL2에서
 `glm-5.3`과 `glm-5.3-flash`의 Z.ai Coding Plan 연결을 확인했습니다.
 두 모델 모두 실제 `claude-sub -p`의 Read·정확한 토큰 응답, PTY의 Read·응답·키보드
 후속 입력·응답·정상 종료, ToolSearch→MCP `get_token` 호출을 통과했습니다.
