@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadRegistry } from '../dist/config.js';
+import { buildSettings, readSettings } from '../dist/settings.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
@@ -27,6 +28,8 @@ try {
   }
   assert.ok(files.includes(`${name}/envs/.env.example`));
   assert.ok(files.includes(`${name}/config/subagents.yaml`));
+  for (const file of ['.claude-plugin/plugin.json', 'hooks/hooks.json', 'hooks/register.js']) assert.ok(files.includes(`${name}/config/dynamic-policy-plugin/${file}`));
+  assert.equal(files.includes(`${name}/config/dynamic-policy-plugin/tsconfig.json`), false);
   assert.equal(files.includes(`${name}/config/subagents.local.yaml`), false);
   execFileSync('tar', ['-xzf', archive, '-C', temporary]);
   const project = join(temporary, name);
@@ -36,7 +39,7 @@ try {
   assert.equal(existsSync(join(project, 'node_modules/typescript')), false);
   const environment = { PATH: process.env.PATH, HOME: temporary };
   const models = JSON.parse(execFileSync(process.execPath, ['dist/cli.js', 'models'], { cwd: project, env: environment, encoding: 'utf8' }));
-  assert.deepEqual(models.availableModels, [...loadRegistry().keys()]);
+  assert.deepEqual(models.availableModels, buildSettings(readSettings(), loadRegistry()).availableModels);
   for (const action of ['install', 'uninstall']) execFileSync(process.execPath, ['dist/cli.js', action, '--help'], { cwd: project, env: environment, stdio: 'pipe' });
   const probe = createServer();
   await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
@@ -53,7 +56,7 @@ try {
       const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(500) });
       const health = await response.json();
       assert.equal(health.runtime, 'typescript');
-      assert.deepEqual(health.models, models.availableModels);
+      assert.deepEqual(health.models, [...loadRegistry().keys()]);
       healthy = true;
       break;
     } catch { await new Promise(resolve => setTimeout(resolve, 20)); }

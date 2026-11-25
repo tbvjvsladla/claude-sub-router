@@ -310,9 +310,20 @@ ouroboros:
 
 위 로컬 예제는 메인 모델·공통 압축 설정·로컬 Ouroboros 선택을 유지하면서
 일반 서브에이전트를 GPT로 보냅니다.
-로컬 파일 수정 후 **새 `claude-sub` 실행부터** 적용되며 라우터 재시작은 필요하지 않습니다.
-코드를 업데이트했다면 `npm run build`로 반영하고 `claude-sub --check`의 `model_policy`에서
-최종 병합값을 확인하세요.
+업데이트한 라우터와 `claude-sub`를 실행한 뒤에는 로컬 파일을 저장하면 **다음에 시작하는
+서브에이전트와 다음 압축 요청**부터 새 설정을 읽습니다. 실행 중인 서브에이전트와
+이미 시작한 압축은 기존 모델을 유지하며, 재개하는 기존 서브에이전트도 모델을 유지합니다.
+Ouroboros 설정 변경은 새 `claude-sub` 세션부터 적용됩니다. `inherit`와 `force`의 의미는
+위와 같습니다. 잘못된 설정은 해당 호출을 거부하므로 파일을 수정하세요.
+
+업데이트 전부터 열려 있던 세션은 새 기능을 로드할 수 없으므로 **업데이트 후 한 번은**
+종료하고 `claude-sub --resume`으로 다시 여세요. 이후 YAML 변경에는 재시작이 필요하지
+않습니다. `claude-sub --check`의 `model_policy`는 현재 파일의 병합 결과이며 실행 중인
+에이전트의 모델은 `/tasks`에서 확인합니다. Claude Code 2.1.304 이상과 플러그인 기능이
+필요합니다. `--safe-mode`, `--bare`는 이 기능과 함께 사용할 수 없습니다. Claude Code의
+설정이나 관리 정책으로 플러그인 hook을 끈 경우 서브에이전트는 시작 시 설정을 유지하며
+동적 변경은 적용되지 않습니다. `/plugin`에서 `router-dynamic-policy` mod 로드를 확인하세요.
+코드를 업데이트했다면 `npm run build` 후 `claude-sub-router restart`를 실행하세요.
 
 ```bash
 claude-sub --check
@@ -707,7 +718,7 @@ SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 
 테스트 메인은 기본 `deepseek-flash`이며 프로젝트의 Sonnet 기본값은 변경하지 않습니다.
 각 실행에 세 정책 섹션이 있는 임시 YAML을 지정하여 기본 실행은 Sonnet을 포함한
-등록 모델 8종을 모두 검사합니다.
+등록 모델을 모두 검사합니다.
 충돌하는 `model: sonnet` 에이전트 정의를 강제로 덮어쓰고, 하위 Agent가 임시 파일의
 무작위 문자열을 **Read 도구로 읽고 반환**했는지 검사합니다. 부모의 파일 읽기는 실패로
 처리합니다. 스트림의 `parent_tool_use_id`, 하위 응답의 실제 모델, 라우터의 Provider
@@ -717,7 +728,28 @@ SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
 결과는 `artifacts/subagents-e2e.json`에 저장합니다. Claude가 출력한 비용은 추정치이며
 특히 `costBasis: unknown`인 커스텀 모델에서는 Provider의 실제 청구액과 다를 수 있습니다.
 
+세션을 유지하면서 모델 정책을 변경하는 실제 PTY 검사는 `npm run test:dynamic-policy`로
+실행합니다. Python의 `pexpect`, systemd 사용자 서비스로 실행 중인 라우터와
+`journalctl`, DeepSeek 키가 필요하며 API 비용이 발생합니다. 임시 정책 파일을 바꿔
+서브에이전트와 압축의 전환을 검증합니다.
+
 ### 최근 검증 결과
+
+**2026-11-25 · GLM 세 모델 및 세션 중 모델 정책 변경**
+
+- Z.ai Coding Plan에 `glm-5.4`, `glm-5.3`, `glm-5.3-flash`를 등록했습니다.
+  복원한 GLM-5.3은 실제 `claude-sub -p`와 대화형 PTY에서 Read·응답을 확인했습니다.
+  GLM-5.4는 이번 실제 호출에서 Z.ai의 HTTP 529 과부하 응답을 받아 현재 성공으로
+  판정하지 않았습니다. GLM-5.3 Flash는 변경 전날의 실제 호출 성공 결과를 재사용했습니다.
+- Claude Code **2.1.332**에서 같은 대화형 PTY를 유지하며 임시 정책 파일을 수정해
+  서브에이전트를 DeepSeek Flash에서 Pro로 변경했습니다. 압축도 `inherit → Pro → inherit`로
+  전환해 두 번의 압축 완료와 정상 종료를 확인했습니다. 실제 PC의 로컬 YAML은 수정하지
+  않았으며 로컬 파일의 설정 병합은 자동 테스트로 확인했습니다.
+- 동적 정책은 Claude Code **2.1.304 이상**과 플러그인 hook이 필요합니다. hook을 끄면
+  서브에이전트는 세션 시작 시 설정을 유지합니다. 업데이트 전에 열었던 세션은 한 번
+  다시 열어야 하며, Ouroboros 정책 변경은 새 세션부터 적용됩니다.
+- 전체 자동 검사 69건, 타입 검사와 빌드, 인증 검사, 릴리스 패키지 검사가 통과했습니다.
+  자동 검사와 실제 Provider 호출의 확인 범위는 다르며, 모든 모델 조합을 실호출한 것은 아닙니다.
 
 **2026-11-18 · Meta Muse Wonder 및 모델 메뉴 순서 업데이트**
 

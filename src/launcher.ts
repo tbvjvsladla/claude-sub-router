@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE, ROOT } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
 import { BASE_URL, context, findExecutable, run } from './platform.ts';
 import type { Context } from './platform.ts';
@@ -9,7 +9,7 @@ import { loadProviderEnvironment } from './environment.ts';
 import { readInstallation } from './installation.ts';
 import { buildSettings, readSettings } from './settings.ts';
 import { startRouter } from './service.ts';
-import { applyModelPolicy, assertModelPolicyVersion, COMPACTION_POLICY_FEATURE, defaultModelPolicy, loadModelPolicy } from './subagents.ts';
+import { applyModelPolicy, assertDynamicPolicyVersion, assertModelPolicyVersion, COMPACTION_POLICY_FEATURE, defaultModelPolicy, DYNAMIC_POLICY_FEATURE, DYNAMIC_POLICY_HEADER, loadModelPolicy } from './subagents.ts';
 import type { ModelPolicy } from './subagents.ts';
 
 export function buildLaunchConfig(registry: Registry, existing: JsonObject, inherited: NodeJS.ProcessEnv, policy: ModelPolicy = defaultModelPolicy()) {
@@ -66,6 +66,7 @@ export function launchPreview(registry = loadRegistry(), existing = readSettings
 
 export async function assertRouterCompatibility(registry: Registry, policy: ModelPolicy, fetcher = fetch): Promise<void> {
   const required = [];
+  required.push(DYNAMIC_POLICY_FEATURE);
   if (policy.compaction.model !== 'inherit') required.push(COMPACTION_POLICY_FEATURE);
   if ([...registry.values()].some(({ provider }) => provider.auth === 'claude_native')) required.push(NATIVE_AUTH_FEATURE);
   if ([...registry.values()].some(({ model }) => model.reasoning?.mode === 'map')) required.push(REASONING_FEATURE);
@@ -85,15 +86,29 @@ export async function launch(args: string[]): Promise<number> {
   const binary = findExecutable('claude');
   if (!binary) throw new ConfigError('claude executable was not found in PATH');
   const { environment, settings } = buildLaunchConfig(registry, existing, loadLaunchEnvironment(registry), policy);
-  if ((policy.subagents.model !== 'inherit' && policy.subagents.force) || policy.compaction.model !== 'inherit') {
-    const version = await run(binary, ['--version']);
-    if (version.code !== 0) throw new ConfigError('Could not determine Claude Code version for model policy');
-    assertModelPolicyVersion(version.stdout, policy);
-  }
+  // Keep the initial policy even if a user's Claude configuration disables
+  // plugins. The mod needs the original environment to restore inherit.
+  environment.CLAUDE_SUB_DYNAMIC_BASELINE = JSON.stringify({
+    model: process.env.CLAUDE_CODE_SUBAGENT_MODEL,
+    force: process.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE,
+    initialOverride: policy.subagents.model !== 'inherit',
+  });
+  const policyPath = process.env.CLAUDE_SUB_SUBAGENT_CONFIG ? resolve(process.env.CLAUDE_SUB_SUBAGENT_CONFIG) : undefined;
+  if (policyPath) environment.CLAUDE_SUB_DYNAMIC_CONFIG = policyPath;
+  else delete environment.CLAUDE_SUB_DYNAMIC_CONFIG;
+  environment.CLAUDE_SUB_DYNAMIC_CLI = join(ROOT, 'dist/cli.js');
+  environment.CLAUDE_SUB_DYNAMIC_NODE = process.execPath;
+  environment.CLAUDE_CODE_GATEWAY_HINT_HEADERS = '1';
+  environment.ANTHROPIC_CUSTOM_HEADERS = `${DYNAMIC_POLICY_HEADER}: ${policyPath ? `path.${Buffer.from(policyPath).toString('base64url')}` : 'default'}`;
+  if (args.includes('--safe-mode') || args.includes('--bare')) throw new ConfigError('Dynamic model policies require plugins; --safe-mode and --bare are not supported');
+  const version = await run(binary, ['--version']);
+  if (version.code !== 0) throw new ConfigError('Could not determine Claude Code version for model policy');
+  assertDynamicPolicyVersion(version.stdout);
+  assertModelPolicyVersion(version.stdout, policy);
   await startRouter(registry);
   await assertRouterCompatibility(registry, policy);
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ['--settings', JSON.stringify(settings), '--model', String(settings.model), ...args], { env: environment, stdio: 'inherit' });
+    const child = spawn(binary, ['--plugin-dir', join(ROOT, 'config/dynamic-policy-plugin'), '--settings', JSON.stringify(settings), '--model', String(settings.model), ...args], { env: environment, stdio: 'inherit' });
     const interrupt = () => child.kill('SIGINT');
     const terminate = () => child.kill('SIGTERM');
     process.on('SIGINT', interrupt).on('SIGTERM', terminate);

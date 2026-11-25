@@ -26,6 +26,8 @@ __pycache__/
 /temp/
 config/claude-test.json
 /config/subagents.local.yaml
+/config/dynamic-policy-plugin/tsconfig.json
+/config/dynamic-policy-plugin/.claude-plugin/types/
 *_progress.md
 
 # Local development tools and user-specific settings

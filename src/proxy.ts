@@ -1,10 +1,11 @@
 import { createServer } from 'node:http';
+import { statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isObject, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
-import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from './subagents.ts';
+import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE, DYNAMIC_POLICY_FEATURE, DYNAMIC_POLICY_HEADER, loadModelPolicy } from './subagents.ts';
 import { applyToolSchemaCompatibility } from './tool-schemas.ts';
 import { applyInlineToolCompatibility } from './inline-tools.ts';
 import { applyMetaMessagesCompatibility } from './meta-messages.ts';
@@ -160,7 +161,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     const url = new URL(request.url ?? '/', 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE, NATIVE_AUTH_FEATURE, REASONING_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
+      response.end(JSON.stringify({ status: 'ok', runtime: 'typescript', features: [COMPACTION_POLICY_FEATURE, DYNAMIC_POLICY_FEATURE, NATIVE_AUTH_FEATURE, REASONING_FEATURE], providers: [...new Set([...registry.values()].map(entry => entry.provider.id))].sort(), models: [...registry.keys()] }));
       return;
     }
     if (request.method === 'GET' && url.pathname === '/v1/models') {
@@ -175,9 +176,23 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     for (const [name, value] of Object.entries(request.headers)) {
       if (value !== undefined) incoming.set(name, Array.isArray(value) ? value.join(',') : value);
     }
-    const compactionModel = incoming.get(COMPACTION_MODEL_HEADER);
+    let compactionModel = incoming.get(COMPACTION_MODEL_HEADER);
     if (compactionModel !== null && !registry.has(compactionModel)) throw new RouterError(400, 'Unknown compaction policy model');
     const requestClass = incoming.get('x-claude-code-request-class');
+    const dynamicPolicy = incoming.get(DYNAMIC_POLICY_HEADER);
+    if (requestClass === 'compaction' && dynamicPolicy !== null) {
+      if (dynamicPolicy.length > 4096 || !/^(default|path\.[A-Za-z0-9_-]+)$/.test(dynamicPolicy)) throw new RouterError(400, 'Invalid dynamic policy');
+      try {
+        const path = dynamicPolicy === 'default' ? undefined : Buffer.from(dynamicPolicy.slice(5), 'base64url').toString('utf8');
+        if (path !== undefined && (!path.startsWith('/') || path.includes('\0'))) throw new Error('Invalid path');
+        if (path !== undefined) {
+          const info = statSync(path);
+          if (!info.isFile() || info.size > 1_048_576) throw new Error('Invalid policy file');
+        }
+        const selection = loadModelPolicy(registry, { path }).compaction.model;
+        compactionModel = selection === 'inherit' ? null : selection;
+      } catch { throw new RouterError(400, 'Invalid dynamic compaction policy'); }
+    }
     // Never infer a feature from prompt text, agent IDs or the main model.
     const model = requestClass === 'compaction' && compactionModel !== null ? compactionModel : body.model;
     const entry = registry.get(model);

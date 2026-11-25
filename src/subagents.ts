@@ -13,6 +13,8 @@ export interface ModelPolicy {
 
 export const COMPACTION_MODEL_HEADER = 'x-claude-sub-compaction-model';
 export const COMPACTION_POLICY_FEATURE = 'compaction-model-policy';
+export const DYNAMIC_POLICY_FEATURE = 'dynamic-model-policy';
+export const DYNAMIC_POLICY_HEADER = 'x-claude-sub-dynamic-policy';
 
 export function defaultModelPolicy(): ModelPolicy {
   return { subagents: { model: 'inherit', force: false }, compaction: { model: 'inherit' }, ouroboros: { model: 'inherit' } };
@@ -113,6 +115,10 @@ export function assertSubagentVersion(version: string, config: SubagentConfig): 
 export function assertModelPolicyVersion(version: string, policy: ModelPolicy): void {
   assertSubagentVersion(version, policy.subagents);
   if (policy.compaction.model !== 'inherit') assertVersion(version, 273, 'Compaction model routing');
+}
+
+export function assertDynamicPolicyVersion(version: string): void {
+  assertVersion(version, 304, 'Dynamic model policies');
 }
 
 function assertVersion(version: string, patch: number, feature: string): void {

@@ -7,6 +7,7 @@ import { launch } from './launcher.ts';
 import { install, uninstall } from './lifecycle.ts';
 import { routerReport, startRouter, stopRouter } from './service.ts';
 import { buildSettings, readSettings } from './settings.ts';
+import { loadModelPolicy } from './subagents.ts';
 
 function option(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -36,6 +37,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (action === 'models') { console.log(JSON.stringify(buildSettings(readSettings(), loadRegistry()), null, 2)); return 0; }
+  if (action === 'subagent-policy') { console.log(JSON.stringify(loadModelPolicy(loadRegistry(), { path: process.env.CLAUDE_SUB_DYNAMIC_CONFIG }).subagents)); return 0; }
   if (action === 'install') { validateOptions(args, ['--env-file', '--service']); await install({ envFile: option(args, '--env-file'), service: option(args, '--service') }); return 0; }
   if (action === 'uninstall') { validateOptions(args, [], ['--dry-run']); await uninstall({ dryRun: args.includes('--dry-run') }); return 0; }
   if (action === 'router') {

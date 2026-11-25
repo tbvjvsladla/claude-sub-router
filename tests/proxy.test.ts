@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { gzipSync } from 'node:zlib';
 import test from 'node:test';
 import { loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE, REASONING_LEVELS } from '../src/config.ts';
 import { createRouterServer } from '../src/proxy.ts';
-import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE } from '../src/subagents.ts';
+import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE, DYNAMIC_POLICY_HEADER } from '../src/subagents.ts';
 import type { JsonObject } from '../src/config.ts';
 import { assertRouterCompatibility } from '../src/launcher.ts';
 import { applyMetaMessagesCompatibility } from '../src/meta-messages.ts';
@@ -103,7 +106,7 @@ test('compaction policy is isolated per client and official request class; other
   try {
     const policy = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
     await assertRouterCompatibility(registry, policy, (_input, init) => fetch(`${base}/health`, init));
-    await assertRouterCompatibility(new Map(), defaultModelPolicy(), async () => { throw new Error('inherit without native auth must not require router features'); });
+    await assert.rejects(() => assertRouterCompatibility(new Map(), defaultModelPolicy(), async () => Response.json({ features: [] })), /claude-sub-router restart/);
     await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
     await assert.rejects(() => assertRouterCompatibility(registry, defaultModelPolicy(), async () => Response.json({ features: [COMPACTION_POLICY_FEATURE, REASONING_FEATURE] })), /claude-sub-router restart/);
     await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ features: [NATIVE_AUTH_FEATURE, REASONING_FEATURE] })), /claude-sub-router restart/);
@@ -147,6 +150,39 @@ test('compaction policy is isolated per client and official request class; other
     assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
     assert.deepEqual(body, original);
   } finally { await close(proxy); }
+});
+
+test('dynamic compaction follows policy changes without changing other requests', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'claude-sub-dynamic-'));
+  const path = join(directory, 'policy.yaml');
+  const upstream: string[] = [];
+  const proxy = createRouterServer(loadRegistry(), {
+    environment: { DEEPSEEK_API_KEY: 'FAKE' },
+    fetch: async (_input, init) => {
+      upstream.push(JSON.parse(String(init?.body)).model);
+      return Response.json({ ok: true });
+    },
+  });
+  const base = await listen(proxy);
+  const headers = { [DYNAMIC_POLICY_HEADER]: `path.${Buffer.from(path).toString('base64url')}`, 'x-claude-code-request-class': 'compaction' };
+  const body = JSON.stringify({ model: 'deepseek-flash', messages: [] });
+  try {
+    writeFileSync(path, 'compaction:\n  model: deepseek-pro\n');
+    assert.equal((await fetch(`${base}/v1/messages`, { method: 'POST', headers, body })).status, 200);
+    assert.equal(upstream.at(-1), 'deepseek-v4-pro');
+    writeFileSync(path, 'compaction:\n  model: inherit\n');
+    assert.equal((await fetch(`${base}/v1/messages`, { method: 'POST', headers, body })).status, 200);
+    assert.equal(upstream.at(-1), 'deepseek-flash');
+    writeFileSync(path, 'compaction:\n  model: invalid\n');
+    const before = upstream.length;
+    assert.equal((await fetch(`${base}/v1/messages`, { method: 'POST', headers, body })).status, 400);
+    assert.equal(upstream.length, before);
+    const deviceHeaders = { ...headers, [DYNAMIC_POLICY_HEADER]: `path.${Buffer.from('/dev/null').toString('base64url')}` };
+    assert.equal((await fetch(`${base}/v1/messages`, { method: 'POST', headers: deviceHeaders, body })).status, 400);
+    assert.equal(upstream.length, before);
+    assert.equal((await fetch(`${base}/v1/messages`, { method: 'POST', headers: { ...headers, 'x-claude-code-request-class': 'main' }, body })).status, 200);
+    assert.equal(upstream.at(-1), 'deepseek-flash');
+  } finally { await close(proxy); rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('Artifact schemas work for DeepSeek Flash and Pro after switching models, including streaming and token counts', async () => {
