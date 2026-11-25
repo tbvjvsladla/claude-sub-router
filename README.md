@@ -460,7 +460,7 @@ API 클라이언트는 `output_config: { effort: none }`을 직접 보낼 수도
 | Sonnet 5.5 | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 | DeepSeek Pro / Flash | thinking 끄기 | `low` | `high` | `high` | `high` | `max` |
 | Kimi K3.1 Pro | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
-| GLM-5.4 / GLM-5.3 Flash | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
+| GLM-5.4 / GLM-5.3 / GLM-5.3 Flash | HTTP 400 | `low` | `high` | `high` | `max` | `max` |
 | MiniMax M3 | thinking 끄기 | effort 제거 | effort 제거 | effort 제거 | effort 제거 | effort 제거 |
 | MiniMax M3.1 Flash | HTTP 400 | `low` | `medium` | `high` | `xhigh` | `max` |
 
@@ -481,8 +481,8 @@ Claude Code의 최대 컨텍스트 환경변수는 안전을 위해 등록된 �
 
 ### Z.ai Coding Plan
 
-`config/providers/zai.yaml`에서 `glm-5.4`와 `glm-5.3-flash`를 등록합니다.
-두 모델은 같은 3단계 추론 정책을 사용하므로 하나의 reasoning 프리셋을 공유합니다.
+`config/providers/zai.yaml`에서 `glm-5.4`, `glm-5.3`, `glm-5.3-flash`를 등록합니다.
+세 모델은 같은 3단계 추론 정책을 사용하므로 하나의 reasoning 프리셋을 공유합니다.
 `envs/CHINA_provider.env` 등 자동 로딩되는 `envs/*.env`에 `ZAI_API_KEY`를 설정하세요.
 키는 **Z.ai Coding Plan 키**여야 하며 표준 모델 API 키와 구분됩니다.
 Anthropic 호환 Coding Plan 주소 `https://api.z.ai/api/anthropic`에 Bearer 인증으로
@@ -491,16 +491,17 @@ Anthropic 호환 Coding Plan 주소 `https://api.z.ai/api/anthropic`에 Bearer �
 ```bash
 claude-sub-router restart
 claude-sub --model glm-5.4 --effort max
+claude-sub --model glm-5.3 --effort low
 claude-sub --model glm-5.3-flash -p '짧게 인사해줘' --effort low
 ```
 
-두 모델 모두 추론이 필수입니다. `medium`은 `high`, `xhigh`는 `max`로 매핑하며
+세 모델 모두 추론이 필수입니다. `medium`은 `high`, `xhigh`는 `max`로 매핑하며
 effort가 없으면 제조사 기본 `max`를 보존합니다. Z.ai는 코딩 작업에 `max`를 권장합니다.
 Coding Plan은 끄기 요청을 `low`로
 완화하지만, 라우터의 `none`은 완전한 추론 끄기를 뜻하므로 `none`·thinking 끄기는
 upstream 호출 전에 HTTP 400으로 거부합니다.
 
-두 모델 모두 멀티모달 모델이며 공식 컨텍스트는 1,000,000토큰, 최대 출력은 128K입니다.
+GLM-5.4와 GLM-5.3 Flash는 멀티모달이며 GLM-5.3은 텍스트 입력 모델입니다. 세 모델의 공식 컨텍스트는 1,000,000토큰, 최대 출력은 128K입니다.
 Z.ai의 Claude Code 직접 연결 예시는 `glm-5.4[1m]`과 `glm-5.3-flash[1m]`을 사용합니다.
 `claude-sub`에서는 YAML의 접미사 없는 모델 ID로 선택합니다. 자동 압축은 출력과 후속
 도구 호출 여유를 위해 **800,000토큰**으로 설정하며, 현재 공통 컨텍스트 상한은
@@ -509,6 +510,7 @@ Z.ai의 Claude Code 직접 연결 예시는 `glm-5.4[1m]`과 `glm-5.3-flash[1m]`
 [공식 Claude Code 설정](https://docs.z.ai/devpack/tool/claude),
 [공식 Claude Code 매핑·컨텍스트 안내](https://docs.z.ai/devpack/latest-model),
 [GLM-5.4 명세](https://docs.z.ai/guides/llm/glm-5.4),
+[GLM-5.3 명세](https://docs.z.ai/guides/llm/glm-5.3),
 [GLM-5.3 Flash 명세](https://docs.z.ai/guides/vlm/glm-5.3-flash).
 
 ### Kimi Code와 DeepSeek Flash 연결 점검

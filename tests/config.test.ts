@@ -76,7 +76,7 @@ test('Z.ai models share Coding Plan settings and require reasoning', () => {
   const registry = loadRegistry();
   const settings = buildSettings({}, registry);
   const models = [...registry.values()].filter(entry => entry.provider.id === 'zai');
-  assert.deepEqual(models.map(entry => entry.model.id), ['glm-5.4', 'glm-5.3-flash']);
+  assert.deepEqual(models.map(entry => entry.model.id), ['glm-5.4', 'glm-5.3', 'glm-5.3-flash']);
   assert.ok(isObject(settings.modelSettings));
   for (const entry of models) {
     const id = entry.model.id;
@@ -189,7 +189,7 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(model.id);
+      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
@@ -211,7 +211,7 @@ test('model picker groups providers in display order while preserving each provi
   const settings = buildSettings({}, registry);
   const expected = [
     'claude-sonnet-5-5', 'deepseek-pro', 'deepseek-flash', 'kimi-k3.1-pro',
-    'minimax-m3.1-flash', 'minimax-m3', 'glm-5.4', 'glm-5.3-flash',
+    'minimax-m3.1-flash', 'minimax-m3', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash',
     'muse-wonder-1.0', 'gpt-6.1-sol', 'gpt-6-luna',
   ];
   assert.deepEqual(settings.availableModels, expected);
