@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE, ROOT } from './config.ts';
+import { ConfigError, getDefaultModel, isObject, loadRegistry, NATIVE_AUTH_FEATURE, REASONING_FEATURE, resolveModelId, ROOT } from './config.ts';
 import type { JsonObject, Registry } from './config.ts';
 import { BASE_URL, context, findExecutable, run } from './platform.ts';
 import type { Context } from './platform.ts';
-import { loadProviderEnvironment } from './environment.ts';
+import { loadProviderEnvironment, providerKeyNames } from './environment.ts';
 import { readInstallation } from './installation.ts';
 import { buildSettings, readSettings } from './settings.ts';
 import { startRouter } from './service.ts';
@@ -26,7 +26,7 @@ export function buildLaunchConfig(registry: Registry, existing: JsonObject, inhe
   ]) delete environment[name];
   const windows: number[] = [];
   for (const { provider, model } of registry.values()) {
-    if (provider.api_key_env) delete environment[provider.api_key_env];
+    for (const key of providerKeyNames(provider)) delete environment[key];
     if ((provider.auth ?? 'api_key') === 'api_key' && model.context) windows.push(model.context.window);
   }
   if ([...registry.values()].some(({ provider }) => provider.auth === 'claude_native')) {
@@ -107,8 +107,19 @@ export async function launch(args: string[]): Promise<number> {
   assertModelPolicyVersion(version.stdout, policy);
   await startRouter(registry);
   await assertRouterCompatibility(registry, policy);
+  // Normalize explicit old IDs before Claude validates its model selection.
+  const launchArgs = [...args];
+  for (const [index, arg] of args.entries()) {
+    if (arg === '--') break;
+    const next = args[index + 1];
+    if (arg === '--model' && next !== undefined) {
+      launchArgs[index + 1] = resolveModelId(registry, next);
+    } else if (arg.startsWith('--model=')) {
+      launchArgs[index] = `--model=${resolveModelId(registry, arg.slice('--model='.length))}`;
+    }
+  }
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ['--plugin-dir', join(ROOT, 'config/dynamic-policy-plugin'), '--settings', JSON.stringify(settings), '--model', String(settings.model), ...args], { env: environment, stdio: 'inherit' });
+    const child = spawn(binary, ['--plugin-dir', join(ROOT, 'config/dynamic-policy-plugin'), '--settings', JSON.stringify(settings), '--model', String(settings.model), ...launchArgs], { env: environment, stdio: 'inherit' });
     const interrupt = () => child.kill('SIGINT');
     const terminate = () => child.kill('SIGTERM');
     process.on('SIGINT', interrupt).on('SIGTERM', terminate);

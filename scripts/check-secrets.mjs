@@ -6,7 +6,8 @@ import { parseEnv } from 'node:util';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const excluded = new Set(['.git', 'node_modules', 'dist', 'artifacts', '.venv', '__pycache__', '.claude', '.claude-sub', '.codex', '.agents', '.aws']);
-const privatePath = path => path !== 'envs/.env.example' && (/(^|\/)\.env(?:\.|$)|\.env$|(^|\/)envs\/|credentials|\.bak$|_progress\.md$|config\/claude-test\.json$/.test(path));
+const environmentExample = path => /^envs\/[^/]*\.example$/.test(path);
+const privatePath = path => !environmentExample(path) && (/(^|\/)\.env(?:\.|$)|\.env$|(^|\/)envs\/|credentials|\.bak$|_progress\.md$|config\/claude-test\.json$/.test(path));
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     if (excluded.has(entry.name)) return [];
@@ -23,7 +24,7 @@ for (const file of new Set(files)) {
   if (privatePath(file)) { failures.push(`${file}: private file must not be tracked`); continue; }
   if (!existsSync(join(root, file))) continue;
   const content = readFileSync(join(root, file), 'utf8');
-  if (file === 'envs/.env.example' && Object.values(parseEnv(content)).some(value => value.trim())) failures.push(`${file}: example values must be empty (values omitted)`);
+  if (environmentExample(file) && Object.values(parseEnv(content)).some(value => value.trim())) failures.push(`${file}: example values must be empty (values omitted)`);
   for (const [index, line] of content.split('\n').entries()) {
     if (patterns.some(pattern => { pattern.lastIndex = 0; return pattern.test(line); })) failures.push(`${file}:${index + 1}: possible credential (value omitted)`);
   }

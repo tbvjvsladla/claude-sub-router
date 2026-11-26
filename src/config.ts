@@ -7,6 +7,12 @@ export const ROOT = fileURLToPath(new URL('../', import.meta.url));
 export const NATIVE_AUTH_FEATURE = 'claude-native-auth';
 export const REASONING_FEATURE = 'reasoning-six-levels';
 export const REASONING_LEVELS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+export const OPENROUTER_PROVIDER = 'openrouter-openai';
+export const OPENROUTER_KEYS = {
+  company: 'C_OPENROUTER_API_KEY',
+  personal: 'P_OPENROUTER_API_KEY',
+  legacy: 'OPENROUTER_API_KEY',
+} as const;
 export type JsonObject = Record<string, unknown>;
 export type ReasoningTarget = string | { action: 'disable' | 'omit' | 'error' };
 export interface Reasoning {
@@ -35,6 +41,15 @@ export interface Provider {
 }
 export type Registry = Map<string, { provider: Provider; model: Model }>;
 export class ConfigError extends Error {}
+
+/** Resolves existing OpenRouter selections without adding them to the picker. */
+export function resolveModelId(registry: Registry, id: string): string {
+  if (!registry.has(id) && (id === 'gpt-6.1-sol' || id === 'gpt-6-luna')) {
+    const renamed = `O_${id}`;
+    if (registry.get(renamed)?.provider.id === OPENROUTER_PROVIDER) return renamed;
+  }
+  return id;
+}
 
 export function isObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -159,5 +174,7 @@ export function loadRegistry(directory = join(ROOT, 'config/providers')): Regist
     }
   }
   getDefaultModel(registry);
-  return registry;
+  return new Map([...registry].toSorted(([left], [right]) =>
+    Number(left.startsWith('O_')) - Number(right.startsWith('O_')),
+  ));
 }

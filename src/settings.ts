@@ -30,6 +30,7 @@ export function buildSettings(existing: JsonObject, registry: Registry): JsonObj
   const selected = settings.model;
   settings.model = getDefaultModel(registry) ?? (typeof selected === 'string' && registry.has(selected) ? selected : registry.keys().next().value);
   const orderedModels = [...registry.entries()].toSorted(([, left], [, right]) =>
+    Number(left.model.id.startsWith('O_')) - Number(right.model.id.startsWith('O_')) ||
     (PROVIDER_PICKER_ORDER.get(left.provider.id) ?? PROVIDER_PICKER_ORDER.size) -
     (PROVIDER_PICKER_ORDER.get(right.provider.id) ?? PROVIDER_PICKER_ORDER.size),
   );

@@ -1,22 +1,20 @@
 provider:
   id: openrouter-openai
-  name: OpenRouter OpenAI
+  name: OpenRouter
   protocol: anthropic
   base_url: https://openrouter.ai/api
-  api_key_env: OPENROUTER_API_KEY
+  api_key_env: C_OPENROUTER_API_KEY
   api_key_header: authorization
 
 models:
-  - id: gpt-6.1-sol
-    upstream_model: openai/gpt-6.1-sol
-    display_name: GPT 6.1 Sol
-    description: OpenRouter · OpenAI · 900k Context
-
-    context:
+  - id: O_claude-opus-5.5
+    upstream_model: anthropic/claude-opus-5.5
+    display_name: O_claude-opus-5.5
+    description: OpenRouter · anthropic · 900k Context
+    context: &context
       window: 900000
       auto_compact_threshold: 800000
-
-    reasoning:
+    reasoning: &mandatory
       mode: map
       source:
         effort: output_config.effort
@@ -30,25 +28,101 @@ models:
         max: max
       unsupported_level: error
 
-  - id: gpt-6-luna
-    upstream_model: openai/gpt-6-luna
-    display_name: GPT 6 Luna
-    description: OpenRouter · OpenAI · 900k Context
+  - id: O_claude-sonnet-5.5
+    upstream_model: anthropic/claude-sonnet-5.5
+    display_name: O_claude-sonnet-5.5
+    description: OpenRouter · anthropic · 900k Context
+    context: *context
+    reasoning: *mandatory
 
-    context:
-      window: 900000
-      auto_compact_threshold: 800000
-
-    reasoning:
+  - id: O_claude-haiku-5.5
+    upstream_model: anthropic/claude-haiku-5.5
+    display_name: O_claude-haiku-5.5
+    description: OpenRouter · anthropic · 900k Context
+    context: *context
+    reasoning: &optional
       mode: map
       source:
         effort: output_config.effort
         thinking: thinking
       mapping:
-        none: none
+        none: { action: disable }
         low: low
         medium: medium
         high: high
         xhigh: xhigh
         max: max
       unsupported_level: error
+
+  - id: O_gpt-6.2-sol
+    upstream_model: openai/gpt-6.2-sol
+    display_name: O_gpt-6.2-sol
+    description: OpenRouter · openai · 900k Context
+    context: *context
+    reasoning: *mandatory
+
+  - id: O_gpt-6.1-terra
+    upstream_model: openai/gpt-6.1-terra
+    display_name: O_gpt-6.1-terra
+    description: OpenRouter · openai · 900k Context
+    context: *context
+    reasoning: *optional
+
+  - id: O_gpt-6-luna
+    upstream_model: openai/gpt-6-luna
+    display_name: O_gpt-6-luna
+    description: OpenRouter · openai · 900k Context
+    context: *context
+    reasoning: *optional
+
+  - id: O_gemini-4-carbon
+    upstream_model: google/gemini-4-carbon
+    display_name: O_gemini-4-carbon
+    description: OpenRouter · google · 900k Context
+    context: *context
+    reasoning: &high
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        none: { action: error }
+        low: low
+        medium: medium
+        high: high
+        xhigh: high
+        max: high
+      unsupported_level: error
+
+  - id: O_gemini-4-neon
+    upstream_model: google/gemini-4-neon
+    display_name: O_gemini-4-neon
+    description: OpenRouter · google · 900k Context
+    context: *context
+    reasoning: &xhigh
+      mode: map
+      source:
+        effort: output_config.effort
+        thinking: thinking
+      mapping:
+        none: { action: error }
+        low: low
+        medium: medium
+        high: high
+        xhigh: xhigh
+        max: xhigh
+      unsupported_level: error
+
+  - id: O_gemini-4-hydrogen
+    upstream_model: google/gemini-4-hydrogen
+    display_name: O_gemini-4-hydrogen
+    description: OpenRouter · google · 900k Context
+    context: *context
+    reasoning: *xhigh
+
+  - id: O_gpt-6.1-sol
+    upstream_model: openai/gpt-6.1-sol
+    display_name: O_gpt-6.1-sol
+    description: OpenRouter · openai · 900k Context
+    context: *context
+    reasoning: *mandatory

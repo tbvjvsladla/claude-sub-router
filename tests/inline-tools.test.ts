@@ -9,7 +9,7 @@ const definition = { name: 'mcp__docs__read', description: 'Read a document', in
 const addition = { type: 'tool_addition', tool: { type: 'tool_definition', definition } };
 
 test('OpenRouter and Meta omit the non-callable Claude deferred placeholder without changing real tools', () => {
-  const openrouter = loadRegistry().get('gpt-6-luna')!.provider;
+  const openrouter = loadRegistry().get('O_gpt-6-luna')!.provider;
   const meta = loadRegistry().get('muse-wonder-1.0')!.provider;
   const placeholder = { name: 'DeferredToolPlaceholder', description: 'Reserved placeholder that keeps deferred tool loading active; never call this tool.', input_schema: { type: 'object', properties: {} }, defer_loading: true };
   const read = { name: 'Read', input_schema: { type: 'object', properties: { file_path: { type: 'string' } } } };

@@ -24,6 +24,65 @@ async function close(server: Server): Promise<void> {
   await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
 }
 
+test('OpenRouter prefers company and retries once with personal only for credit failures', async () => {
+  const environment: NodeJS.ProcessEnv = {};
+  const calls: { key: string | null; body: string }[] = [];
+  let status = 200;
+  let source: string | undefined;
+  let personalStatus = 200;
+  const proxy = createRouterServer(loadRegistry(), {
+    environment,
+    fetch: async (_input, init) => {
+      const key = new Headers(init?.headers).get('authorization');
+      calls.push({ key, body: String(init?.body) });
+      const resultStatus = key === 'Bearer personal' ? personalStatus : status;
+      return Response.json({ error: { metadata: { limit_source: source } } }, { status: resultStatus });
+    },
+  });
+  const base = await listen(proxy);
+  const send = async (model = 'O_gpt-6-luna', path = '/v1/messages') => {
+    calls.length = 0;
+    const response = await fetch(`${base}${path}`, {
+      method: 'POST', body: JSON.stringify({ model }),
+    });
+    await response.text();
+    return response.status;
+  };
+  const keys = () => calls.map(call => call.key);
+  try {
+    assert.equal(await send(), 503);
+    assert.deepEqual(keys(), []);
+    environment.P_OPENROUTER_API_KEY = 'personal';
+    assert.equal(await send(), 200);
+    assert.deepEqual(keys(), ['Bearer personal']);
+    delete environment.P_OPENROUTER_API_KEY;
+    environment.C_OPENROUTER_API_KEY = 'company';
+    assert.equal(await send(), 200);
+    assert.deepEqual(keys(), ['Bearer company']);
+    environment.P_OPENROUTER_API_KEY = 'personal';
+    assert.equal(await send('gpt-6-luna'), 200);
+    assert.deepEqual(keys(), ['Bearer company']);
+    assert.equal(JSON.parse(calls[0]?.body ?? '').model, 'openai/gpt-6-luna');
+    for (const [code, reason, retry] of [
+      [402, 'openrouter_credits', true], [402, 'openrouter_key_limit', true],
+      [403, 'openrouter_key_limit', true], [402, 'openrouter_in_flight_budget', false],
+      [403, 'openrouter_guardrail_budget', false], [402, undefined, false],
+      [401, undefined, false], [429, undefined, false], [500, undefined, false],
+    ] as const) {
+      status = code;
+      source = reason;
+      assert.equal(await send('O_gpt-6-luna', '/v1/messages/count_tokens'), retry ? 200 : code);
+      assert.deepEqual(keys(), retry ? ['Bearer company', 'Bearer personal'] : ['Bearer company']);
+      if (retry) assert.equal(calls[0]?.body, calls[1]?.body);
+    }
+    status = 402;
+    source = 'openrouter_credits';
+    personalStatus = 402;
+    assert.equal(await send(), 402);
+    assert.deepEqual(keys(), ['Bearer company', 'Bearer personal']);
+  } finally { await close(proxy); }
+});
+
 test('concurrent native login and API sessions retain their credentials, including token counts and provider errors', async () => {
   const calls: { url: string; model: string; headers: Headers }[] = [];
   const logs: unknown[] = [];
@@ -104,7 +163,7 @@ test('compaction policy is isolated per client and official request class; other
     await response.text(); return response;
   }
   try {
-    const policy = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
+    const policy = { ...defaultModelPolicy(), compaction: { model: 'O_gpt-6-luna' } };
     await assertRouterCompatibility(registry, policy, (_input, init) => fetch(`${base}/health`, init));
     await assert.rejects(() => assertRouterCompatibility(new Map(), defaultModelPolicy(), async () => Response.json({ features: [] })), /claude-sub-router restart/);
     await assert.rejects(() => assertRouterCompatibility(registry, policy, async () => Response.json({ status: 'ok', runtime: 'typescript', models: [...registry.keys()] })), /claude-sub-router restart/);
@@ -134,18 +193,18 @@ test('compaction policy is isolated per client and official request class; other
       assert.equal(events.filter(item => item.event === 'REQUEST').at(-1)!.metadata.requested_model, 'kimi-k3.1-pro');
     }
     const before = calls.length;
-    await Promise.all(['deepseek-flash', 'gpt-6-luna'].map(model => send({ [COMPACTION_MODEL_HEADER]: model, 'x-claude-code-request-class': 'compaction' })));
+    await Promise.all(['deepseek-flash', 'O_gpt-6-luna'].map(model => send({ [COMPACTION_MODEL_HEADER]: model, 'x-claude-code-request-class': 'compaction' })));
     assert.deepEqual(new Set(calls.slice(before).map(call => call.body.model)), new Set(['deepseek-flash', 'openai/gpt-6-luna']));
-    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages/count_tokens')).status, 200);
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'O_gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages/count_tokens')).status, 200);
     assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
     // Native aliases need not be registered when an explicit compaction policy selects a registered target.
-    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages', { ...body, model: 'unregistered-native-id' })).status, 200);
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'O_gpt-6-luna', 'x-claude-code-request-class': 'compaction' }, '/v1/messages', { ...body, model: 'unregistered-native-id' })).status, 200);
     assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
     const count = calls.length;
     assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'missing', 'x-claude-code-request-class': 'compaction' })).status, 400);
     assert.equal(calls.length, count);
     upstreamStatus = 400;
-    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'gpt-6-luna', 'x-claude-code-request-class': 'compaction' })).status, 400);
+    assert.equal((await send({ [COMPACTION_MODEL_HEADER]: 'O_gpt-6-luna', 'x-claude-code-request-class': 'compaction' })).status, 400);
     assert.equal(calls.length, count + 1);
     assert.equal(calls.at(-1)!.body.model, 'openai/gpt-6-luna');
     assert.deepEqual(body, original);
@@ -343,8 +402,10 @@ test('six reasoning levels and the thinking toggle use each provider policy over
   // Expected wire values are independent of the YAML and mapping implementation.
   const expected: Record<string, (string | null)[]> = {
     'claude-sonnet-5-5': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
-    'gpt-6.1-sol': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
-    'gpt-6-luna': ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+    'O_gpt-6.1-sol': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'O_gpt-6-luna': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'O_gpt-6.1-terra': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
+    'O_claude-haiku-5.5': [null, 'low', 'medium', 'high', 'xhigh', 'max'],
     'deepseek-pro': [null, 'low', 'high', 'high', 'high', 'max'],
     'deepseek-flash': [null, 'low', 'high', 'high', 'high', 'max'],
     'kimi-k3.1-pro': [null, 'low', 'high', 'high', 'max', 'max'],
@@ -365,7 +426,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const before = calls.length;
             const response = await fetch(`${base}${path}`, { method: 'POST', headers: { authorization: 'Bearer FAKE_OAUTH' }, body: JSON.stringify(body) });
             const none = toggleOff || effort === 'none';
-            const unsupported = none && ['claude-sonnet-5-5', 'gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(modelId);
+            const unsupported = none && ['claude-sonnet-5-5', 'O_gpt-6.1-sol', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(modelId);
             assert.equal(response.status, unsupported ? 400 : 200, `${modelId} ${effort} ${path} toggleOff=${toggleOff}`);
             const result = await response.text();
             if (unsupported) {
@@ -378,7 +439,7 @@ test('six reasoning levels and the thinking toggle use each provider policy over
             const wireEffort = wireEfforts[none ? 0 : index];
             assert.deepEqual(wire.output_config, wireEffort === null ? { format: body.output_config.format } : { effort: wireEffort, format: body.output_config.format });
             const thinking = modelId === 'muse-wonder-1.0' ? { ...body.thinking, display: 'summarized' } : body.thinking;
-            assert.deepEqual(wire.thinking, none && modelId !== 'gpt-6-luna' ? { type: 'disabled' } : thinking);
+            assert.deepEqual(wire.thinking, none ? { type: 'disabled' } : thinking);
             assert.deepEqual(wire.messages, body.messages);
             assert.deepEqual(wire.tools, body.tools);
             assert.equal(wire.model, registry.get(modelId)!.model.upstream_model);

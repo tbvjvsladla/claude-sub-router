@@ -55,7 +55,7 @@ test('shared feature defaults are inherit and explicit policy files retain legac
     writeFileSync(path, 'model: deepseek-flash\nforce: true\n');
     assert.deepEqual(loadModelPolicy(registry, { path }), { ...defaultModelPolicy(), subagents: { model: 'deepseek-flash', force: true } });
     writeFileSync(path, 'subagents:\n  model: deepseek-flash\n  force: false\ncompaction:\n  model: gpt-6-luna\nouroboros:\n  model: gpt-6.1-sol\n');
-    assert.deepEqual(loadModelPolicy(registry, { path }), { subagents: { model: 'deepseek-flash', force: false }, compaction: { model: 'gpt-6-luna' }, ouroboros: { model: 'gpt-6.1-sol' } });
+    assert.deepEqual(loadModelPolicy(registry, { path }), { subagents: { model: 'deepseek-flash', force: false }, compaction: { model: 'O_gpt-6-luna' }, ouroboros: { model: 'O_gpt-6.1-sol' } });
     for (const section of ['compaction', 'ouroboros'] as const) for (const model of registry.keys()) {
       writeFileSync(path, `${section}:\n  model: ${model}\n`);
       assert.deepEqual(loadModelPolicy(registry, { path }), { ...defaultModelPolicy(), [section]: { model } });
@@ -65,7 +65,7 @@ test('shared feature defaults are inherit and explicit policy files retain legac
       'compaction:\n  model: inherit\n  force: true', 'ouroboros:\n  model: 3', 'ouroboros:\n  model: inherit\n  extra: true',
       'subagents:\n  model: inherit\n  force: "false"', 'subagents:\n  model: inherit',
       'model: inherit\nforce: false\ncompaction:\n  model: inherit',
-      'compaction:\n  model: inherit\ncompaction:\n  model: gpt-6-luna',
+      'compaction:\n  model: inherit\ncompaction:\n  model: O_gpt-6-luna',
     ]) {
       writeFileSync(path, source);
       assert.throws(() => loadModelPolicy(registry, { path }), ConfigError, source);
@@ -80,7 +80,7 @@ test('local policy overrides individual keys, including false and inherit, while
   const shared = join(directory, 'subagents.yaml');
   const local = join(directory, 'subagents.local.yaml');
   mkdirSync(directory);
-  const source = 'subagents:\n  model: deepseek-flash\n  force: true\ncompaction:\n  model: gpt-6-luna\nouroboros:\n  model: claude-sonnet-5-5\n';
+  const source = 'subagents:\n  model: deepseek-flash\n  force: true\ncompaction:\n  model: O_gpt-6-luna\nouroboros:\n  model: claude-sonnet-5-5\n';
   try {
     writeFileSync(shared, source);
     const baseline = loadModelPolicy(registry, { root });
@@ -88,12 +88,12 @@ test('local policy overrides individual keys, including false and inherit, while
     assert.deepEqual(loadModelPolicy(registry, { root }), { ...baseline, subagents: { model: 'deepseek-flash', force: false } });
     writeFileSync(local, 'subagents:\n  model: inherit\ncompaction:\n  model: inherit\nouroboros:\n  model: inherit\n');
     assert.deepEqual(loadModelPolicy(registry, { root }), { ...defaultModelPolicy(), subagents: { model: 'inherit', force: true } });
-    const override = 'subagents:\n  model: gpt-6.1-sol\n';
+    const override = 'subagents:\n  model: O_gpt-6.1-sol\n';
     writeFileSync(local, override);
-    assert.deepEqual(loadModelPolicy(registry, { root }), { ...baseline, subagents: { model: 'gpt-6.1-sol', force: true } });
-    writeFileSync(shared, source.replace('gpt-6-luna', 'deepseek-pro').replace('force: true', 'force: false'));
+    assert.deepEqual(loadModelPolicy(registry, { root }), { ...baseline, subagents: { model: 'O_gpt-6.1-sol', force: true } });
+    writeFileSync(shared, source.replace('O_gpt-6-luna', 'deepseek-pro').replace('force: true', 'force: false'));
     assert.deepEqual(loadModelPolicy(registry, { root }), {
-      subagents: { model: 'gpt-6.1-sol', force: false }, compaction: { model: 'deepseek-pro' }, ouroboros: baseline.ouroboros,
+      subagents: { model: 'O_gpt-6.1-sol', force: false }, compaction: { model: 'deepseek-pro' }, ouroboros: baseline.ouroboros,
     });
     assert.equal(readFileSync(local, 'utf8'), override);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -108,8 +108,8 @@ test('missing and empty local policies keep shared defaults and local-only insta
   try {
     writeFileSync(local, 'ouroboros:\n  model: claude-sonnet-5-5\n');
     assert.deepEqual(loadModelPolicy(registry, { root }), { ...defaultModelPolicy(), ouroboros: { model: 'claude-sonnet-5-5' } });
-    writeFileSync(join(directory, 'subagents.yaml'), 'compaction:\n  model: gpt-6-luna\n');
-    const expected = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
+    writeFileSync(join(directory, 'subagents.yaml'), 'compaction:\n  model: O_gpt-6-luna\n');
+    const expected = { ...defaultModelPolicy(), compaction: { model: 'O_gpt-6-luna' } };
     for (const source of ['', '# No overrides\n', '{}', 'subagents: {}\ncompaction: {}\nouroboros: {}\n']) {
       writeFileSync(local, source);
       assert.deepEqual(loadModelPolicy(registry, { root }), expected, source);
@@ -133,7 +133,7 @@ test('invalid local policies fail with their own path and cannot hide invalid sh
       'subagents:\n  model: missing', 'subagents:\n  model: ""', 'subagents:\n  model: 3',
       'subagents:\n  force: "false"', 'subagents:\n  force: null', 'subagents:\n  force: true\n  force: false',
       'subagents:\n  extra: true', 'compaction:\n  force: false', 'ouroboros:\n  model: missing',
-      'ouroboros:\n  model: inherit\nouroboros:\n  model: gpt-6-luna', 'model: inherit\nforce: false', 'subagents: [',
+      'ouroboros:\n  model: inherit\nouroboros:\n  model: O_gpt-6-luna', 'model: inherit\nforce: false', 'subagents: [',
     ]) {
       writeFileSync(local, source);
       assert.throws(() => loadModelPolicy(registry, { root }), error => error instanceof ConfigError && error.message.startsWith(local), source);
@@ -156,8 +156,8 @@ test('explicit policy paths select one file without applying shared or per-PC fi
   try {
     writeFileSync(join(directory, 'subagents.yaml'), 'invalid: true');
     writeFileSync(join(directory, 'subagents.local.yaml'), 'invalid: true');
-    writeFileSync(path, 'compaction:\n  model: gpt-6-luna\n');
-    assert.deepEqual(loadModelPolicy(registry, { root, path }), { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } });
+    writeFileSync(path, 'compaction:\n  model: O_gpt-6-luna\n');
+    assert.deepEqual(loadModelPolicy(registry, { root, path }), { ...defaultModelPolicy(), compaction: { model: 'O_gpt-6-luna' } });
     assert.throws(() => loadModelPolicy(registry, { root, path: join(root, 'missing.yaml') }), /could not read model policy/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -175,15 +175,15 @@ test('inherit leaves native model choices intact; selecting each knob only overr
   assert.equal(baseline.environment.ANTHROPIC_CUSTOM_HEADERS, undefined);
   for (const feature of ['subagents', 'compaction', 'ouroboros'] as const) {
     const policy = defaultModelPolicy();
-    policy[feature].model = 'gpt-6.1-sol';
+    policy[feature].model = 'O_gpt-6.1-sol';
     const { environment, settings } = buildLaunchConfig(registry, {}, inherited, policy);
     assert.deepEqual(settings, baseline.settings);
     assert.equal(environment.CLAUDE_CONFIG_DIR, '/native-profile');
-    assert.equal(environment.CLAUDE_CODE_SUBAGENT_MODEL, feature === 'subagents' ? 'gpt-6.1-sol' : 'native-agent');
+    assert.equal(environment.CLAUDE_CODE_SUBAGENT_MODEL, feature === 'subagents' ? 'O_gpt-6.1-sol' : 'native-agent');
     assert.equal(environment.CLAUDE_CODE_SUBAGENT_MODEL_FORCE, feature === 'subagents' ? '0' : '1');
-    assert.equal(environment.ANTHROPIC_CUSTOM_HEADERS, feature === 'compaction' ? `${COMPACTION_MODEL_HEADER}: gpt-6.1-sol` : undefined);
+    assert.equal(environment.ANTHROPIC_CUSTOM_HEADERS, feature === 'compaction' ? `${COMPACTION_MODEL_HEADER}: O_gpt-6.1-sol` : undefined);
     assert.equal(environment.CLAUDE_CODE_GATEWAY_HINT_HEADERS, feature === 'compaction' ? '1' : '0');
-    assert.equal(environment.OUROBOROS_CLARIFICATION_MODEL, feature === 'ouroboros' ? 'gpt-6.1-sol' : 'native-interview');
+    assert.equal(environment.OUROBOROS_CLARIFICATION_MODEL, feature === 'ouroboros' ? 'O_gpt-6.1-sol' : 'native-interview');
     assert.equal(environment.OUROBOROS_PIN_MODELS, feature === 'ouroboros' ? '1' : '0');
     assert.equal(environment.OUROBOROS_QA_MODEL, 'native-qa');
     assert.equal(environment.OUROBOROS_EXECUTION_MODEL, 'native-worker');
@@ -193,7 +193,7 @@ test('inherit leaves native model choices intact; selecting each knob only overr
 });
 
 test('compaction selection checks the version needed for official request hints, while inherit needs no hints', () => {
-  const policy = { ...defaultModelPolicy(), compaction: { model: 'gpt-6-luna' } };
+  const policy = { ...defaultModelPolicy(), compaction: { model: 'O_gpt-6-luna' } };
   for (const version of ['2.1.272', '2.0.999', 'unknown']) assert.throws(() => assertModelPolicyVersion(version, policy), /2.1.273/);
   for (const version of ['2.1.273 (Claude Code)', '2.1.294', '2.2.0', '3.0.0']) assert.doesNotThrow(() => assertModelPolicyVersion(version, policy));
   assert.doesNotThrow(() => assertModelPolicyVersion('unknown', defaultModelPolicy()));

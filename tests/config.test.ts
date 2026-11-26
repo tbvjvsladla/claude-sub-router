@@ -41,17 +41,17 @@ test('registry preserves the existing providers, defaults and YAML aliases', () 
 
 test('OpenRouter GPT models share positive efforts but declare different none support', () => {
   const registry = loadRegistry();
-  for (const id of ['gpt-6.1-sol', 'gpt-6-luna']) {
+  for (const id of ['O_gpt-6.1-sol', 'O_gpt-6-luna']) {
     const entry = registry.get(id)!;
     assert.equal(entry.provider.id, 'openrouter-openai');
     assert.equal(entry.provider.protocol, 'anthropic');
     assert.equal(entry.provider.base_url, 'https://openrouter.ai/api');
-    assert.equal(entry.provider.api_key_env, 'OPENROUTER_API_KEY');
+    assert.equal(entry.provider.api_key_env, 'C_OPENROUTER_API_KEY');
     assert.equal(entry.provider.api_key_header, 'authorization');
-    assert.equal(entry.model.upstream_model, `openai/${id}`);
+    assert.equal(entry.model.upstream_model, `openai/${id.slice(2)}`);
     assert.deepEqual(entry.model.context, { window: 900000, auto_compact_threshold: 800000 });
     assert.equal(entry.model.reasoning?.mode, 'map');
-    assert.deepEqual(entry.model.reasoning?.mapping, { none: id === 'gpt-6-luna' ? 'none' : { action: 'error' }, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
+    assert.deepEqual(entry.model.reasoning?.mapping, { none: id === 'O_gpt-6-luna' ? { action: 'disable' } : { action: 'error' }, low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' });
     assert.equal(entry.model.reasoning?.unsupported_level, 'error');
   }
   assert.deepEqual(registry.get('claude-sonnet-5-5')?.model.reasoning?.mapping?.none, { action: 'error' });
@@ -170,7 +170,7 @@ test('reasoning maps every configured effort without mutating other fields', () 
 
 test('map configurations require exactly the six common levels and explicit valid actions', () => {
   assert.deepEqual(REASONING_LEVELS, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
-  const reasoning = loadRegistry().get('gpt-6-luna')!.model.reasoning!;
+  const reasoning = loadRegistry().get('O_gpt-6-luna')!.model.reasoning!;
   for (const level of REASONING_LEVELS) {
     const incomplete = structuredClone(reasoning);
     delete incomplete.mapping![level];
@@ -189,14 +189,14 @@ test('thinking off normalizes to none even with a stale positive effort or no ou
     for (const effort of [...REASONING_LEVELS, null, undefined]) {
       const body = { output_config: { effort, format: { type: 'json_schema' } }, thinking: { type: 'disabled' }, messages: [{ role: 'assistant', content: [{ type: 'thinking', thinking: 'FAKE', signature: 'FAKE' }] }], tools: [{ name: 'Read' }] };
       const original = structuredClone(body);
-      const unsupported = ['gpt-6.1-sol', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(model.id);
+      const unsupported = ['O_gpt-6.1-sol', 'O_gpt-6.2-sol', 'O_claude-opus-5.5', 'O_claude-sonnet-5.5', 'O_gemini-4-carbon', 'O_gemini-4-neon', 'O_gemini-4-hydrogen', 'claude-sonnet-5-5', 'minimax-m3.1-flash', 'kimi-k3.1-pro', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash', 'muse-wonder-1.0'].includes(model.id);
       if (unsupported) {
         assert.throws(() => applyReasoning(body, model), /does not support reasoning effort: none/);
         assert.throws(() => applyReasoning({ thinking: { type: 'disabled' } }, model), /does not support reasoning effort: none/);
       } else {
-        const output_config = model.id === 'gpt-6-luna' ? { format: { type: 'json_schema' }, effort: 'none' } : { format: { type: 'json_schema' } };
+        const output_config = { format: { type: 'json_schema' } };
         assert.deepEqual(applyReasoning(body, model), { ...original, output_config });
-        assert.deepEqual(applyReasoning({ thinking: { type: 'disabled' } }, model), model.id === 'gpt-6-luna' ? { thinking: { type: 'disabled' }, output_config: { effort: 'none' } } : { thinking: { type: 'disabled' } });
+        assert.deepEqual(applyReasoning({ thinking: { type: 'disabled' } }, model), { thinking: { type: 'disabled' } });
       }
       assert.deepEqual(body, original);
     }
@@ -212,9 +212,13 @@ test('model picker groups providers in display order while preserving each provi
   const expected = [
     'claude-sonnet-5-5', 'deepseek-pro', 'deepseek-flash', 'kimi-k3.1-pro',
     'minimax-m3.1-flash', 'minimax-m3', 'glm-5.4', 'glm-5.3', 'glm-5.3-flash',
-    'muse-wonder-1.0', 'gpt-6.1-sol', 'gpt-6-luna',
+    'muse-wonder-1.0', 'O_claude-opus-5.5', 'O_claude-sonnet-5.5', 'O_claude-haiku-5.5',
+    'O_gpt-6.2-sol', 'O_gpt-6.1-terra', 'O_gpt-6-luna', 'O_gemini-4-carbon', 'O_gemini-4-neon',
+    'O_gemini-4-hydrogen', 'O_gpt-6.1-sol',
   ];
   assert.deepEqual(settings.availableModels, expected);
+  const openRouterIds = expected.filter(id => id.startsWith('O_'));
+  assert.deepEqual([...registry.keys()].slice(-openRouterIds.length), openRouterIds);
   assert.equal(settings.model, 'claude-sonnet-5-5');
   const picker = settings.modelPicker as { options: { model: string; label: string }[] };
   assert.deepEqual(picker.options.map(option => option.model), expected);
@@ -226,7 +230,7 @@ test('model picker groups providers in display order while preserving each provi
 test('settings and launcher preserve the native profile and apply routing only to the child', () => {
   const registry = loadRegistry();
   const existing = { unrelated: true, model: 'kimi-k3.1-pro', modelSettings: { 'kimi-k3.1-pro': { unrelated: 'keep' } } };
-  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', META_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE' };
+  const inherited = { PATH: '/usr/bin', ANTHROPIC_API_KEY: 'FAKE', ANTHROPIC_AUTH_TOKEN: 'FAKE', CLAUDE_CODE_OAUTH_TOKEN: 'FAKE', ANTHROPIC_CUSTOM_HEADERS: 'FAKE', LOCAL_ROUTER_TOKEN: 'FAKE', DEEPSEEK_API_KEY: 'FAKE', MINIMAX_API_KEY: 'FAKE', META_API_KEY: 'FAKE', OPENROUTER_API_KEY: 'FAKE', P_OPENROUTER_API_KEY: 'FAKE', C_OPENROUTER_API_KEY: 'FAKE' };
   const original = structuredClone({ existing, inherited });
   const { environment, settings } = buildLaunchConfig(registry, existing, inherited);
   assert.equal(settings.model, 'claude-sonnet-5-5');
@@ -242,8 +246,8 @@ test('settings and launcher preserve the native profile and apply routing only t
   assert.equal(modelSettings['kimi-k3.1-pro']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['kimi-k3.1-pro']?.unrelated, 'keep');
   assert.equal(modelSettings['minimax-m3']?.autoCompactWindow, 800000);
-  assert.equal(modelSettings['gpt-6.1-sol']?.autoCompactWindow, 800000);
-  assert.equal(modelSettings['gpt-6-luna']?.autoCompactWindow, 800000);
+  assert.equal(modelSettings['O_gpt-6.1-sol']?.autoCompactWindow, 800000);
+  assert.equal(modelSettings['O_gpt-6-luna']?.autoCompactWindow, 800000);
   assert.equal(modelSettings['claude-sonnet-5-5'], undefined);
   assert.throws(() => buildLaunchConfig(registry, { env: {} }, {}), /must not contain/);
   assert.throws(() => buildSettings({ modelPicker: [] }, registry), /must be objects/);

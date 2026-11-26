@@ -64,9 +64,9 @@ const cases = models.map(model => ({ name: 'force_over_definition', model, force
 if (!requested.length) {
   cases.push(
     { name: 'inherit_main_model', model: 'inherit', force: false, expected: parentModel, agentType: 'router-probe' },
-    { name: 'default_without_definition', model: 'gpt-6.1-sol', force: false, expected: 'gpt-6.1-sol', agentType: 'router-probe' },
-    { name: 'definition_over_default', model: 'gpt-6.1-sol', force: false, definitionModel: 'deepseek-flash', expected: 'deepseek-flash', agentType: 'router-probe' },
-    { name: 'force_builtin_explore', model: 'gpt-6.1-sol', force: true, expected: 'gpt-6.1-sol', agentType: 'Explore' },
+    { name: 'default_without_definition', model: 'O_gpt-6.1-sol', force: false, expected: 'O_gpt-6.1-sol', agentType: 'router-probe' },
+    { name: 'definition_over_default', model: 'O_gpt-6.1-sol', force: false, definitionModel: 'deepseek-flash', expected: 'deepseek-flash', agentType: 'router-probe' },
+    { name: 'force_builtin_explore', model: 'O_gpt-6.1-sol', force: true, expected: 'O_gpt-6.1-sol', agentType: 'Explore' },
   );
 }
 try {

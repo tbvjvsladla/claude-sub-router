@@ -1,7 +1,7 @@
 # claude-sub
 
 기존 `claude` 명령의 로그인·플러그인·대화 기록을 공유하면서 `claude-sub`에서
-Sonnet 5.5, DeepSeek, Kimi, MiniMax, Z.ai GLM, Meta Muse Wonder, OpenRouter GPT를 선택하는 **TypeScript 로컬 라우터**입니다.
+Sonnet 5.5, DeepSeek, Kimi, MiniMax, Z.ai GLM, Meta Muse Wonder, OpenRouter 모델을 선택하는 **TypeScript 로컬 라우터**입니다.
 Python이나 로컬 인증 토큰은 필요하지 않습니다.
 
 ## 실행 구조와 지원 환경
@@ -55,7 +55,7 @@ MiniMax M3와 M3.1 Flash는 `config/providers/minimax.yaml`로 등록되어 있�
 `MINIMAX_API_KEY`가 필요합니다. 기존 키 파일을 쓰는 경우 그 파일에 키를 추가하세요.
 
 GitHub 저장소에는 서비스별 빈 예제 `envs/china.env.example`, `envs/usa.env.example`,
-`envs/anthropic.env.example`도 있습니다. 필요한 예제만 골라 키를 입력하세요.
+`envs/anthropic.env.example`, `envs/openrouter.env.example`도 있습니다. 필요한 예제만 골라 키를 입력하세요.
 예를 들어 중국 서비스 키를 입력하려면:
 
 1. `nano envs/china.env.example`로 예제를 엽니다.
@@ -285,7 +285,7 @@ nano config/subagents.local.yaml
 
 ```yaml
 subagents:
-  model: gpt-6.1-sol
+  model: O_gpt-6.1-sol
   force: true
 ouroboros:
   model: claude-sonnet-5-5
@@ -293,7 +293,7 @@ ouroboros:
 
 이 PC의 Ouroboros만 Sonnet으로 고정하려면 위 예제에서 `ouroboros` 섹션만 작성하면 됩니다.
 다른 PC에서는 각자 원하는 등록 모델 ID를 지정하세요. 자동 압축 모델도 바꾸려면 로컬에
-`compaction: { model: gpt-6-luna }`처럼 추가합니다. 공통 파일에 기능별 설명과 모델 ID 안내가 있습니다.
+`compaction: { model: O_gpt-6-luna }`처럼 추가합니다. 공통 파일에 기능별 설명과 모델 ID 안내가 있습니다.
 
 공통 파일을 먼저 읽고 **로컬에 적은 키만 덮어씁니다**. 이 예에서는 압축 설정은 공통
 기본값을 따릅니다. `subagents.force`만 적거나 `model`만 적을 수도 있고, 명시한
@@ -604,35 +604,34 @@ M3의 추론 제어는 `thinking`으로 보존합니다. 공식 Anthropic 호환
 [MiniMax 공식 Anthropic API 문서](https://platform.minimax.io/docs/api-reference/text-anthropic-api),
 [M3 공식 모델 설명](https://github.com/MiniMax-AI/MiniMax-M3/blob/main/README.md).
 
-### OpenRouter OpenAI
+### OpenRouter
 
-`config/providers/openrouter-openai.yaml`에 두 모델을 등록합니다.
+`/model`에서 OpenRouter 모델 10개는 직접 연결 모델 뒤에 표시됩니다.
 
-| Claude Code 모델 ID | OpenRouter 모델 ID | 운영 컨텍스트 | 자동 압축 설정 |
-| --- | --- | --- | --- |
-| `gpt-6.1-sol` | `openai/gpt-6.1-sol` | 900,000 | 800,000 |
-| `gpt-6-luna` | `openai/gpt-6-luna` | 900,000 | 800,000 |
+| Claude Code 모델 ID | OpenRouter 모델 ID |
+| --- | --- |
+| `O_claude-opus-5.5` | `anthropic/claude-opus-5.5` |
+| `O_claude-sonnet-5.5` | `anthropic/claude-sonnet-5.5` |
+| `O_claude-haiku-5.5` | `anthropic/claude-haiku-5.5` |
+| `O_gpt-6.2-sol` | `openai/gpt-6.2-sol` |
+| `O_gpt-6.1-terra` | `openai/gpt-6.1-terra` |
+| `O_gpt-6-luna` | `openai/gpt-6-luna` |
+| `O_gemini-4-carbon` | `google/gemini-4-carbon` |
+| `O_gemini-4-neon` | `google/gemini-4-neon` |
+| `O_gemini-4-hydrogen` | `google/gemini-4-hydrogen` |
+| `O_gpt-6.1-sol` | `openai/gpt-6.1-sol` |
 
-`envs/USA.env` 등 자동 검색되는 키 파일에 `OPENROUTER_API_KEY`를 넣으세요.
-라우터는 OpenRouter의 Anthropic 호환 `https://openrouter.ai/api/v1/messages`로
-등록된 키만 Bearer 인증하여 전송합니다. 원본 `claude` 구독 환경은 변경하지 않습니다.
+`envs/openrouter.env.example`을 참고해 `envs/openrouter.env`에 회사 키(`C_OPENROUTER_API_KEY`)나
+개인 키(`P_OPENROUTER_API_KEY`)를 입력하세요. 둘 다 있으면 요청마다 회사 키를 먼저 사용합니다.
+OpenRouter가 크레딧 부족이나 키 지출 한도를 명시하면 같은 요청을 개인 키로 한 번 재시도합니다.
+이전 단일 `OPENROUTER_API_KEY`는 새 키 두 개가 모두 비어 있을 때 사용합니다.
+기존 설정과 CLI 요청의 `gpt-6.1-sol`과 `gpt-6-luna`는 해당 `O_` 모델로 연결됩니다.
 
-확인한 로컬 Hermes의 `-900k` 프리셋은 Codex OAuth용 클라이언트 별칭이며,
-OpenRouter 모델 ID가 아닙니다. 이 프로젝트에서는 요청한 900k를 **운영 상한**으로
-적용하고 upstream에는 `-900k`를 붙이지 않습니다. OpenRouter가 두 모델에 공시한
-컨텍스트는 각각 1,050,000토큰입니다. 800k 자동 압축 역시 이 프로젝트의 정책입니다.
-[GPT 6.1 Sol](https://openrouter.ai/openai/gpt-6.1-sol),
-[GPT 6 Luna](https://openrouter.ai/openai/gpt-6-luna).
+운영 컨텍스트는 900,000 토큰이고 자동 압축 기준은 800,000 토큰입니다.
+추론은 모델이 지원하는 가장 가까운 강도로 매핑하고, 추론이 필수인 모델은 끄기를 거부합니다.
+[OpenRouter 모델 목록](https://openrouter.ai/api/v1/models) ·
+[크레딧과 요청 제한](https://openrouter.ai/docs/api/reference/limits)
 
-GPT-6 Luna의 공식 6단계를 공통 기준으로 사용합니다. Luna는 `none`까지 동일값으로
-매핑하고, Sol은 추론이 필수이므로 `none: { action: error }`로 명시합니다.
-두 모델의 나머지 다섯 단계는 동일값으로 매핑합니다. Anthropic 요청의
-`output_config.effort`를 매핑하고 OpenRouter가 대상 모델의 reasoning 형식으로 변환합니다.
-[OpenAI GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna),
-[OpenAI GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol),
-[공개 모델 메타데이터](https://openrouter.ai/api/v1/models),
-[reasoning 옵션 문서](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens),
-[Anthropic Messages API](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages).
 
 Claude Code가 보내는 비호출용 deferred placeholder는 OpenRouter 요청에서만 제거합니다.
 실제 도구와 ToolSearch는 유지하므로 도구 검색을 끄지 않고 최초 호출의 HTTP 400을 방지합니다.
@@ -713,7 +712,7 @@ npm run test:cli -- --anthropic-auth
 npm run test:subagents
 npm run test:subagents -- kimi-k3.1-pro minimax-m3
 npm run test:subagents -- --policies-only
-SUBAGENT_TEST_MAIN_MODEL=gpt-6.1-sol npm run test:subagents
+SUBAGENT_TEST_MAIN_MODEL=O_gpt-6.1-sol npm run test:subagents
 ```
 
 테스트 메인은 기본 `deepseek-flash`이며 프로젝트의 Sonnet 기본값은 변경하지 않습니다.

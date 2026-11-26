@@ -3,12 +3,13 @@ import { statSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { isObject, NATIVE_AUTH_FEATURE, REASONING_FEATURE } from './config.ts';
+import { isObject, NATIVE_AUTH_FEATURE, OPENROUTER_KEYS, OPENROUTER_PROVIDER, REASONING_FEATURE, resolveModelId } from './config.ts';
 import type { JsonObject, Model, Provider, Registry } from './config.ts';
 import { COMPACTION_MODEL_HEADER, COMPACTION_POLICY_FEATURE, DYNAMIC_POLICY_FEATURE, DYNAMIC_POLICY_HEADER, loadModelPolicy } from './subagents.ts';
 import { applyToolSchemaCompatibility } from './tool-schemas.ts';
 import { applyInlineToolCompatibility } from './inline-tools.ts';
 import { applyMetaMessagesCompatibility } from './meta-messages.ts';
+import { providerKeyNames } from './environment.ts';
 
 export class RouterError extends Error {
   status: number;
@@ -51,7 +52,7 @@ export function applyReasoning(body: JsonObject, model: Model): JsonObject {
   return payload;
 }
 
-export function upstreamHeaders(incoming: Headers, provider: Provider, environment: NodeJS.ProcessEnv): Headers {
+export function upstreamHeaders(incoming: Headers, provider: Provider, environment: NodeJS.ProcessEnv, keyName = selectedKeyName(provider, environment)): Headers {
   const headers = new Headers({ 'content-type': 'application/json', 'anthropic-version': incoming.get('anthropic-version') ?? '2023-06-01' });
   if (provider.auth === 'claude_subscription' || provider.auth === 'claude_native') {
     if (provider.base_url.replace(/\/+$/, '') !== 'https://api.anthropic.com') throw new RouterError(500, 'Invalid Claude upstream');
@@ -74,7 +75,7 @@ export function upstreamHeaders(incoming: Headers, provider: Provider, environme
     return headers;
   }
   if (provider.auth && provider.auth !== 'api_key') throw new RouterError(500, 'Unsupported upstream auth');
-  const key = environment[provider.api_key_env ?? ''] ?? '';
+  const key = keyName === undefined ? '' : environment[keyName] ?? '';
   if (!key.trim()) throw new RouterError(503, 'Provider API key is not configured');
   if (!/^[\x20-\x7e]+$/.test(key)) throw new RouterError(503, 'Provider API key contains invalid header characters');
   if (provider.api_key_header === 'authorization') headers.set('authorization', `Bearer ${key}`);
@@ -83,6 +84,19 @@ export function upstreamHeaders(incoming: Headers, provider: Provider, environme
   if (beta) headers.set('anthropic-beta', beta);
   stripOAuthBetas(headers);
   return headers;
+}
+
+function selectedKeyName(provider: Provider, environment: NodeJS.ProcessEnv): string | undefined {
+  return providerKeyNames(provider).find(name => environment[name]?.trim());
+}
+
+function openRouterCreditFailure(status: number, content: Buffer): boolean {
+  let body: unknown;
+  try { body = JSON.parse(content.toString('utf8')); }
+  catch { return false; }
+  if (!isObject(body) || !isObject(body.error) || !isObject(body.error.metadata)) return false;
+  const source = body.error.metadata.limit_source;
+  return source === 'openrouter_key_limit' || (status === 402 && source === 'openrouter_credits');
 }
 
 function stripOAuthBetas(headers: Headers): void {
@@ -177,6 +191,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
       if (value !== undefined) incoming.set(name, Array.isArray(value) ? value.join(',') : value);
     }
     let compactionModel = incoming.get(COMPACTION_MODEL_HEADER);
+    if (compactionModel !== null) compactionModel = resolveModelId(registry, compactionModel);
     if (compactionModel !== null && !registry.has(compactionModel)) throw new RouterError(400, 'Unknown compaction policy model');
     const requestClass = incoming.get('x-claude-code-request-class');
     const dynamicPolicy = incoming.get(DYNAMIC_POLICY_HEADER);
@@ -194,13 +209,14 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
       } catch { throw new RouterError(400, 'Invalid dynamic compaction policy'); }
     }
     // Never infer a feature from prompt text, agent IDs or the main model.
-    const model = requestClass === 'compaction' && compactionModel !== null ? compactionModel : body.model;
+    const model = requestClass === 'compaction' && compactionModel !== null ? compactionModel : resolveModelId(registry, body.model);
     const entry = registry.get(model);
     if (!entry) throw new RouterError(400, 'Unknown model');
     const counting = url.pathname.endsWith('/count_tokens');
     let payload = applyToolSchemaCompatibility(applyInlineToolCompatibility(applyReasoning(body, entry.model), entry.provider), entry.provider);
     if (entry.provider.id === 'meta') payload = applyMetaMessagesCompatibility(payload);
-    const headers = upstreamHeaders(incoming, entry.provider, environment);
+    const keyName = selectedKeyName(entry.provider, environment);
+    const headers = upstreamHeaders(incoming, entry.provider, environment, keyName);
     log('REQUEST', { provider: entry.provider.id, model, requested_model: body.model, request_class: requestClass, upstream_model: entry.model.upstream_model, auth: headers.has('x-api-key') ? 'api_key' : 'bearer', mode: entry.model.reasoning?.mode ?? 'observe', effort_in: isObject(body.output_config) ? body.output_config.effort ?? null : null, effort_out: isObject(payload.output_config) ? payload.output_config.effort ?? null : null, stream: body.stream === true, messages: Array.isArray(body.messages) ? body.messages.length : 0, tools: Array.isArray(body.tools) ? body.tools.length : 0 });
     payload.model = entry.model.upstream_model;
     const controller = new AbortController();
@@ -209,11 +225,25 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
     request.once('aborted', aborted);
     response.once('close', closed);
     try {
-      const upstream = await upstreamFetch(`${entry.provider.base_url.replace(/\/+$/, '')}${url.pathname}${url.search}`, {
-        method: 'POST', headers, body: JSON.stringify(payload), redirect: 'manual',
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(options.timeoutMs ?? (counting ? 60_000 : 300_000))]),
-      });
-      log('UPSTREAM_STATUS', { provider: entry.provider.id, model: entry.model.id, status: upstream.status });
+      const upstreamUrl = `${entry.provider.base_url.replace(/\/+$/, '')}${url.pathname}${url.search}`;
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(options.timeoutMs ?? (counting ? 60_000 : 300_000))]);
+      const wireBody = JSON.stringify(payload);
+      const send = (authHeaders: Headers) => upstreamFetch(upstreamUrl, { method: 'POST', headers: authHeaders, body: wireBody, redirect: 'manual', signal });
+      let upstream = await send(headers);
+      let errorContent: Buffer | undefined;
+      const personalKey = environment[OPENROUTER_KEYS.personal];
+      const openRouter = entry.provider.id === OPENROUTER_PROVIDER;
+      let credential = keyName === OPENROUTER_KEYS.company ? 'company' : keyName === OPENROUTER_KEYS.personal ? 'personal' : 'legacy';
+      if (openRouter && credential === 'company' && personalKey?.trim() && personalKey !== environment[OPENROUTER_KEYS.company] && [402, 403].includes(upstream.status)) {
+        errorContent = Buffer.from(await upstream.arrayBuffer());
+        if (openRouterCreditFailure(upstream.status, errorContent)) {
+          log('OPENROUTER_KEY_FALLBACK', { model, status: upstream.status });
+          upstream = await send(upstreamHeaders(incoming, entry.provider, environment, OPENROUTER_KEYS.personal));
+          errorContent = undefined;
+          credential = 'personal';
+        }
+      }
+      log('UPSTREAM_STATUS', { provider: entry.provider.id, model: entry.model.id, status: upstream.status, ...(openRouter ? { credential } : {}) });
       const selectedHeaders = responseHeaders(upstream.headers);
       if (body.stream === true && !counting && upstream.status < 400 && upstream.body) {
         selectedHeaders['content-type'] ??= 'text/event-stream';
@@ -221,7 +251,7 @@ export function createRouterServer(registry: Registry, options: ProxyOptions = {
         response.flushHeaders();
         await pipeline(Readable.fromWeb(upstream.body), response);
       } else {
-        const content = Buffer.from(await upstream.arrayBuffer());
+        const content = errorContent ?? Buffer.from(await upstream.arrayBuffer());
         response.writeHead(upstream.status, selectedHeaders);
         response.end(content);
       }

@@ -9,12 +9,9 @@ coverage/
 .env
 .env.*
 *.env
-!.env.example
+!*.env.example
 /envs/*
-!/envs/.env.example
-!/envs/china.env.example
-!/envs/usa.env.example
-!/envs/anthropic.env.example
+!/envs/*.example
 
 # Local runtimes, caches, and temporary files
 .venv/

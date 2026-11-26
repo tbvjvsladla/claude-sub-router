@@ -108,7 +108,7 @@ test('keys discovered in separate files authenticate the matching provider HTTP 
   const root = fixture();
   const registry = loadRegistry();
   writeFileSync(join(root, 'envs/CHINA.env'), 'MOONSHOT_API_KEY=FAKE_KIMI\nDEEPSEEK_API_KEY=FAKE_DEEPSEEK');
-  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX\nOPENROUTER_API_KEY=FAKE_OPENROUTER\nMETA_API_KEY=FAKE_META\nZAI_API_KEY=FAKE_ZAI');
+  writeFileSync(join(root, 'envs/USA.env'), 'MINIMAX_API_KEY=FAKE_MINIMAX\nC_OPENROUTER_API_KEY=FAKE_OPENROUTER\nMETA_API_KEY=FAKE_META\nZAI_API_KEY=FAKE_ZAI');
   const { environment } = loadProviderEnvironment(registry, { root, environment: {} });
   const received: string[] = [];
   const server = createRouterServer(registry, { environment, fetch: async (_input, init) => {

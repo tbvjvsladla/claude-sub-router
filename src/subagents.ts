@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
-import { ConfigError, isObject, ROOT } from './config.ts';
+import { ConfigError, isObject, resolveModelId, ROOT } from './config.ts';
 import type { Registry } from './config.ts';
 
 export interface SubagentConfig { model: string; force: boolean }
@@ -65,8 +65,8 @@ export function loadModelPolicy(registry: Registry, options: { root?: string; pa
         throw new ConfigError(`${path}.${section}: expected model (string)${agent ? ' and force (boolean)' : ''}`);
       }
       if (!partial || 'model' in selection) {
-        const model = selection.model;
-        if (typeof model !== 'string' || !/^[\x21-\x7e]+$/.test(model)) throw new ConfigError(`${path}.${section}: expected model (string)`);
+        if (typeof selection.model !== 'string' || !/^[\x21-\x7e]+$/.test(selection.model)) throw new ConfigError(`${path}.${section}: expected model (string)`);
+        const model = resolveModelId(registry, selection.model);
         if (model !== 'inherit' && !registry.has(model)) {
           throw new ConfigError(`${path}.${section}: model must be inherit or a registered model ID (${[...registry.keys()].join(', ')})`);
         }

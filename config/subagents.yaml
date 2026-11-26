@@ -7,8 +7,8 @@
 #   deepseek-pro, deepseek-flash  (DEEPSEEK_API_KEY)
 #   kimi-k3.1-pro               (MOONSHOT_API_KEY)
 #   minimax-m3                  (MINIMAX_API_KEY)
-#   gpt-6.1-sol, gpt-6-luna      (OPENROUTER_API_KEY)
-# Anthropic 등록 ID: claude-sonnet-5-5. 예: model: gpt-6.1-sol
+#   O_ 접두사가 붙은 모델         (C_OPENROUTER_API_KEY / P_OPENROUTER_API_KEY)
+# Anthropic 등록 ID: claude-sonnet-5-5. 예: model: O_gpt-6.1-sol
 # 서브에이전트·압축은 저장 후 새 호출부터 적용됩니다. Ouroboros는 새 세션부터 적용됩니다.
 # 오류 시 다른 모델로 자동 대체하지 않습니다.
 

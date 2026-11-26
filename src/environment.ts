@@ -1,8 +1,14 @@
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
-import { ConfigError, ROOT } from './config.ts';
-import type { Registry } from './config.ts';
+import { ConfigError, OPENROUTER_KEYS, OPENROUTER_PROVIDER, ROOT } from './config.ts';
+import type { Provider, Registry } from './config.ts';
+
+/** Returns the credentials a provider is allowed to load, in priority order. */
+export function providerKeyNames(provider: Provider): readonly string[] {
+  if (provider.id === OPENROUTER_PROVIDER) return Object.values(OPENROUTER_KEYS);
+  return provider.api_key_env ? [provider.api_key_env] : [];
+}
 
 function regularFile(path: string): boolean {
   try {
@@ -36,7 +42,7 @@ export function environmentFiles(root = ROOT, envFile?: string): string[] {
 export function loadProviderEnvironment(registry: Registry, options: { root?: string; envFile?: string; environment?: NodeJS.ProcessEnv } = {}): { environment: NodeJS.ProcessEnv; files: string[] } {
   const files = environmentFiles(options.root, options.envFile);
   const environment = { ...(options.environment ?? process.env) };
-  const keys = new Set([...registry.values()].flatMap(({ provider }) => provider.api_key_env ? [provider.api_key_env] : []));
+  const keys = new Set([...registry.values()].flatMap(({ provider }) => providerKeyNames(provider)));
   const definitions = new Map<string, { value: string; file: string }>();
   for (const file of files) {
     let parsed: ReturnType<typeof parseEnv>;
